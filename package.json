@@ -1,0 +1,22 @@
+{
+  "name": "Powerful-Discord-QQ-Msg-Relay",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "https://github.com/XxLittleCxX/Powerful-Discord-QQ-Msg-Relay",
+  "author": "LittleC <i@ltlec.cn>",
+  "private": true,
+  "scripts": {
+    "watch": "tsc --watch",
+    "dev": "nodemon dist/index.js"
+  },
+  "devDependencies": {
+    "koishi": "^3.0.0",
+    "koishi-adapter-discord": "^1.0.0",
+    "koishi-adapter-onebot": "^3.0.0",
+    "nodemon": "^2.0.7",
+    "typescript": "^4.2.2"
+  },
+  "dependencies": {
+    "dotenv": "^8.2.0"
+  }
+}
