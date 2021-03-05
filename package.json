@@ -10,13 +10,17 @@
     "dev": "nodemon dist/index.js"
   },
   "devDependencies": {
-    "koishi": "^3.0.0",
     "koishi-adapter-discord": "^1.0.0",
     "koishi-adapter-onebot": "^3.0.0",
     "nodemon": "^2.0.7",
     "typescript": "^4.2.2"
   },
   "dependencies": {
-    "dotenv": "^8.2.0"
+    "dotenv": "^8.2.0",
+    "koishi": "^3.0.0",
+    "koishi-plugin-mysql": "^3.0.0-beta.16",
+    "mysql": "^2.18.1",
+    "reflect-metadata": "^0.1.13",
+    "typeorm": "^0.2.31"
   }
 }
