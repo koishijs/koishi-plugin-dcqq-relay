@@ -13,4 +13,7 @@ export class MessageRelation {
 
     @Column("text")
     message: string;
+
+    @Column("boolean", {default: false})
+    deleted: boolean;
 }

@@ -12,7 +12,7 @@ import { Embed } from 'koishi-adapter-discord/dist/types'
 require('dotenv').config()
 
 axios.interceptors.request.use(req => {
-  //console.log(req.data)
+  console.log(req.data)
   return req
 })
 
@@ -38,6 +38,32 @@ app.plugin(require('koishi-plugin-mysql'), {
 
 let logger = new Logger('discord')
 //logger.level = 3
+
+app.on('message-deleted', async (meta) => {
+  if (meta.platform === "discord") {
+    const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
+    let data = await getConnection().getRepository(MessageRelation).findOne({
+      discord: meta.messageId,
+      deleted: false
+    })
+    if (data) {
+      await onebot.deleteMessage('', data.onebot)
+      data.deleted = true
+      await getConnection().getRepository(MessageRelation).save(data)
+    }
+  } else {
+    const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+    let data = await getConnection().getRepository(MessageRelation).findOne({
+      onebot: meta.messageId.toString(),
+      deleted: false
+    })
+    if (data) {
+      await dcBot.deleteMessage(process.env.CHANNEL_DISCORD, data.discord)
+      data.deleted = true
+      await getConnection().getRepository(MessageRelation).save(data)
+    }
+  }
+})
 
 app.on('message', async (meta) => {
   if (meta.channelId !== process.env.CHANNEL_DISCORD && meta.channelId !== process.env.CHANNEL_ONEBOT) {
