@@ -8,6 +8,7 @@ import axios from 'axios'
 import { Logger, segment } from 'koishi-utils'
 import { createConnection, getConnection } from 'typeorm'
 import { MessageRelation } from './entity/message'
+import { Embed } from 'koishi-adapter-discord/dist/types'
 require('dotenv').config()
 
 axios.interceptors.request.use(req => {
@@ -55,49 +56,50 @@ app.on('message', async (meta) => {
       } else if (v.type === "video") {
         return `[视频: ${v.data.file}]`
       }
-      console.log(v)
-      return segment.join([v])
+      return segment.join([v]).trim()
     }).join('')
     let quotePrefix = ""
     let quoteObj: MessageRelation | null;
-    if(meta.quote){
+    if (meta.quote) {
       quoteObj = await getConnection().getRepository(MessageRelation).findOne({
         discord: meta.quote.messageId
       })
-      quotePrefix = segment('reply', {id: quoteObj.onebot})
+      quotePrefix = segment('reply', { id: quoteObj.onebot })
     }
     let sendId = await onebot.sendGroupMessage(process.env.CHANNEL_ONEBOT, `${quotePrefix}${meta.author.username}#${meta.author.discriminator}:\n${contents}`)
     let r = new MessageRelation()
     r.discord = meta.messageId
     r.onebot = sendId
-    r.message = meta.content
+    r.message = segment.parse(meta.content).filter(v => v.type === "text").map(v => segment.join([v])).join('')
     await getConnection().getRepository(MessageRelation).save(r)
   } else {
     const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
     let parsed = segment.parse(meta.content)
     const quoteObj = parsed.find(v => v.type === 'quote')
     let quoteId = null
-    let quote:MessageRelation | null = null;
-    if(quoteObj){
+    let quote: MessageRelation | null = null;
+    if (quoteObj) {
       quote = await getConnection().getRepository(MessageRelation).findOne({
         onebot: quoteObj.data.id
       })
-      if(quote){
+      if (quote) {
         quoteId = quote.discord
+      } else {
+        console.log('quote not found')
       }
     }
+    let embeds: Embed[] = []
     let contents = parsed.map(v => {
-      if(v.type === "quote"){
+      if (v.type === "quote") {
         return ''
       }
-      if(v.type === 'at'){
+      if (v.type === 'at') {
         return ''
       }
-      console.log(v)
-      return segment.join([v])
+      return segment.join([v]).trim()
     }).join('')
-    let embeds = []
-    if(quoteId){
+
+    if (quoteId) {
       embeds.push({
         description: `回复 | [[ ↑ ]](https://discord.com/channels/${process.env.GUILD_DISCORD}/${process.env.CHANNEL_DISCORD}/${quoteId})`,
         footer: {
@@ -114,7 +116,7 @@ app.on('message', async (meta) => {
     let r = new MessageRelation()
     r.discord = sentId
     r.onebot = meta.messageId
-    r.message = meta.content
+    r.message = segment.parse(meta.content).filter(v => v.type === "text").map(v => segment.join([v])).join('')
     await getConnection().getRepository(MessageRelation).save(r)
   }
 })
