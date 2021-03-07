@@ -121,6 +121,11 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
       return `[视频: ${v.data.file}]`
+    } else if(v.type === 'at'){
+      if(v.data.type === "all" || v.data.type === "here"){
+        return `@${v.data.type}`
+      }
+      return `@${v.data.role || v.data.id}`
     }
     return segment.join([v]).trim()
   }).join('')
@@ -159,6 +164,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     }
     return segment.join([v]).trim()
   }).join('')
+  contents = contents.replace(/@everyone/, () => '@ everyone').replace(/@here/, () => '@ here')
 
   if (quoteId) {
     embeds.push({
