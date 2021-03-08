@@ -38,6 +38,10 @@ export async function apply (ctx: Context, config?: Config) {
   })
 
   ctx.on('message-updated', async (meta) => {
+    if (meta.userId === config.webhookId) {
+      return;
+    }
+    
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).findOne({
@@ -47,7 +51,9 @@ export async function apply (ctx: Context, config?: Config) {
       if (data) {
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
-        await onebot.deleteMessage('', data.onebot)
+        try{
+          await onebot.deleteMessage('', data.onebot)
+        }catch(e){}
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
         let sendId = await onebot.sendGroupMessage(c.onebotChannel, msg + "(edited)")
         data.onebot = sendId
@@ -122,10 +128,14 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     } else if (v.type === "video") {
       return `[视频: ${v.data.file}]`
     } else if(v.type === 'at'){
-      if(v.data.type === "all" || v.data.type === "here"){
+      if(v.data.type === "here"){
         return `@${v.data.type}`
+      }else if(v.data.type === 'all'){
+        return segment.join([v]).trim()
       }
       return `@${v.data.role || v.data.id}`
+    }else if(v.type === "share"){
+      return v.data?.title + ' ' + v.data.url
     }
     return segment.join([v]).trim()
   }).join('')
@@ -137,7 +147,13 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     })
     quotePrefix = segment('reply', { id: quoteObj.onebot })
   }
-  return `${quotePrefix}${meta.author.username}#${meta.author.discriminator}:\n${contents}`
+  let username = ""
+  if(meta.author.nickname !== meta.author.username){
+    username = `${meta.author.nickname}(${meta.author.username}#${meta.author.discriminator})`
+  }else {
+    username = `${meta.author.username}#${meta.author.discriminator}`
+  }
+  return `${quotePrefix}${username}:\n${contents}`
 }
 const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
   let parsed = segment.parse(meta.content)
@@ -177,7 +193,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
   return {
     content: contents,
     embeds,
-    username: `[QQ:${meta.userId}]${meta.username}`,
+    username: `[QQ:${meta.userId}] ${meta.username}`,
     avatar_url: `https://q1.qlogo.cn/g?b=qq&nk=${meta.userId}&s=640`
   }
 }
