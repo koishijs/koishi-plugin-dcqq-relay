@@ -8,24 +8,30 @@ import { MessageRelation } from './entity/message'
 import { Embed } from 'koishi-adapter-discord/dist/types'
 require('dotenv').config()
 
-export interface Config {
-  host: string;
-  username: string;
-  password: string;
-  database: string;
-  onebotSelfId: string;
+interface RelayRelation {
   discordChannel: string;
-  onebotChannel: string;
   discordGuild: string;
+  onebotChannel: string;
   webhookId: string;
   webhookToken: string;
+}
+
+export interface Config {
+  database: {
+    host: string;
+    username: string;
+    password: string;
+    database: string;
+  }
+  onebotSelfId: string;
   discordToken: string;
+  relations: RelayRelation[]
 }
 
 let c: Config;
 
 export async function apply (ctx: Context, config?: Config) {
-  const { host, username, password, database } = config
+  const { host, username, password, database } = config.database
   c = config
   await createConnection({
     type: "mysql",
@@ -38,7 +44,7 @@ export async function apply (ctx: Context, config?: Config) {
   })
 
   ctx.on('message-updated', async (meta) => {
-    if (meta.userId === config.webhookId) {
+    if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
     
@@ -48,6 +54,7 @@ export async function apply (ctx: Context, config?: Config) {
         discord: meta.messageId,
         deleted: false
       })
+      const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
       if (data) {
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
@@ -55,7 +62,7 @@ export async function apply (ctx: Context, config?: Config) {
           await onebot.deleteMessage('', data.onebot)
         }catch(e){}
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
-        let sendId = await onebot.sendGroupMessage(c.onebotChannel, msg + "(edited)")
+        let sendId = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
         data.onebot = sendId
         data.deleted = false
         await getConnection().getRepository(MessageRelation).save(data)
@@ -82,8 +89,9 @@ export async function apply (ctx: Context, config?: Config) {
         onebot: meta.messageId.toString(),
         deleted: false
       })
+      const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId).discordChannel
       if (data) {
-        await dcBot.deleteMessage(config.discordChannel, data.discord)
+        await dcBot.deleteMessage(discordChannel, data.discord)
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
       }
@@ -91,16 +99,18 @@ export async function apply (ctx: Context, config?: Config) {
   })
 
   ctx.on('message', async (meta) => {
-    if (meta.channelId !== config.discordChannel && meta.channelId !== config.onebotChannel) {
+    if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
       return
     }
-    if (meta.userId === config.webhookId) {
+    if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
+    const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
     if (meta.platform === 'discord') {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       const msg = await adaptMessage(meta)
-      let sendId = await onebot.sendGroupMessage(config.onebotChannel, msg)
+      
+      let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
       r.discord = meta.messageId
       r.onebot = sendId
@@ -109,7 +119,7 @@ export async function apply (ctx: Context, config?: Config) {
     } else {
       const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       const data = await adaptOnebotMessage(meta)
-      let sentId = await dcBot.executeWebhook(config.webhookId, config.webhookToken, data, true)
+      let sentId = await dcBot.executeWebhook(relation.webhookId, relation.webhookToken, data, true)
       let r = new MessageRelation()
       r.discord = sentId
       r.onebot = meta.messageId
@@ -181,10 +191,10 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     return segment.join([v]).trim()
   }).join('')
   contents = contents.replace(/@everyone/, () => '@ everyone').replace(/@here/, () => '@ here')
-
+  const relation = c.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
   if (quoteId) {
     embeds.push({
-      description: `回复 | [[ ↑ ]](https://discord.com/channels/${c.discordGuild}/${c.discordChannel}/${quoteId})`,
+      description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
       footer: {
         text: quote.message
       }

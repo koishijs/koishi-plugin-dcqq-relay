@@ -7,7 +7,7 @@
   "scripts": {
     "watch": "tsc --watch"
   },
-  "typings":"dist/index.d.ts",
+  "typings": "dist/index.d.ts",
   "files": [
     "dist"
   ],
@@ -18,7 +18,6 @@
   "dependencies": {
     "koishi-adapter-discord": "link:/home/littlec/Dev/koishi/packages/adapter-discord",
     "koishi-core": "^3.0.1",
-    "koishi-plugin-mysql": "^3.0.0-beta.16",
     "mysql": "^2.18.1",
     "reflect-metadata": "^0.1.13",
     "typeorm": "^0.2.31"
