@@ -2,11 +2,10 @@
   "name": "koishi-plugin-dcqq-relay",
   "version": "0.1.0",
   "main": "dist/index.js",
-  "repository": "https://github.com/XxLittleCxX/Powerful-Discord-QQ-Msg-Relay",
+  "repository": "https://github.com/XxLittleCxX/koishi-plugin-dcqq-relay",
   "author": "LittleC <i@ltlec.cn>",
   "scripts": {
-    "watch": "tsc --watch",
-    "dev": "nodemon dist/index.js"
+    "watch": "tsc --watch"
   },
   "typings":"dist/index.d.ts",
   "files": [
