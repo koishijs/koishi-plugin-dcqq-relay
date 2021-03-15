@@ -32,7 +32,7 @@ export interface Config {
 
 let c: Config;
 
-export async function apply (ctx: Context, config?: Config) {
+export async function apply(ctx: Context, config?: Config) {
   const { host, username, password, database } = config.database
   c = config
   await createConnection({
@@ -49,7 +49,7 @@ export async function apply (ctx: Context, config?: Config) {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
-    
+
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).findOne({
@@ -60,9 +60,9 @@ export async function apply (ctx: Context, config?: Config) {
       if (data) {
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
-        try{
+        try {
           await onebot.deleteMessage('', data.onebot)
-        }catch(e){}
+        } catch (e) { }
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
         let sendId = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
         data.onebot = sendId
@@ -111,7 +111,7 @@ export async function apply (ctx: Context, config?: Config) {
     if (meta.platform === 'discord') {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       const msg = await adaptMessage(meta)
-      
+
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
       r.discord = meta.messageId
@@ -134,21 +134,21 @@ export async function apply (ctx: Context, config?: Config) {
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   let contents = segment.parse(meta.content).map(v => {
     if (v.type === "face") {
-      return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
+      return segment('image', { file: `https://cdn.discordapp.com/emojis/${v.data.id}` })
     } else if (v.type === "file") {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
       return `[视频: ${v.data.file}]`
-    } else if(v.type === 'at'){
-      if(v.data.type === "here"){
+    } else if (v.type === 'at') {
+      if (v.data.type === "here") {
         return `@${v.data.type}`
-      }else if(v.data.type === 'all'){
+      } else if (v.data.type === 'all') {
         return segment.join([v]).trim()
       }
       return `@${v.data.role || v.data.id}`
-    }else if(v.type === "share"){
+    } else if (v.type === "share") {
       return v.data?.title + ' ' + v.data.url
-    }else if(v.type === 'embed'){
+    } else if (v.type === 'embed') {
       let embed = JSON.parse(v.data.data) as Embed
       let rtn = ''
       rtn += embed.description || ''
@@ -168,9 +168,9 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     quotePrefix = segment('reply', { id: quoteObj.onebot })
   }
   let username = ""
-  if(meta.author.nickname !== meta.author.username){
+  if (meta.author.nickname !== meta.author.username) {
     username = `${meta.author.nickname}(${meta.author.username}#${meta.author.discriminator})`
-  }else {
+  } else {
     username = `${meta.author.username}#${meta.author.discriminator}`
   }
   return `${quotePrefix}${username}:\n${contents}`
@@ -197,6 +197,9 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     }
     if (v.type === 'at') {
       return ''
+    }
+    if (v.type === 'text') {
+      return segment.unescape(v.data.content)
     }
     return segment.join([v]).trim()
   }).join('')
