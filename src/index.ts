@@ -1,3 +1,5 @@
+import 'koishi-adapter-discord'
+import 'koishi-adapter-onebot'
 import { App, Context, Session } from 'koishi-core'
 import 'reflect-metadata'
 import { CQBot } from 'koishi-adapter-onebot/dist/bot'
@@ -132,7 +134,7 @@ export async function apply (ctx: Context, config?: Config) {
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   let contents = segment.parse(meta.content).map(v => {
     if (v.type === "face") {
-      return `:${v.data.name}:`
+      return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
     } else if (v.type === "file") {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
@@ -146,6 +148,14 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       return `@${v.data.role || v.data.id}`
     }else if(v.type === "share"){
       return v.data?.title + ' ' + v.data.url
+    }else if(v.type === 'embed'){
+      let embed = JSON.parse(v.data.data) as Embed
+      let rtn = ''
+      rtn += embed.description || ''
+      embed.fields?.forEach(field => {
+        rtn += `${field.name}: ${field.value}\n`
+      })
+      return rtn
     }
     return segment.join([v]).trim()
   }).join('')
