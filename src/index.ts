@@ -16,6 +16,7 @@ interface RelayRelation {
   onebotChannel: string;
   webhookId: string;
   webhookToken: string;
+  discordLogChannel?: string;
 }
 
 export interface Config {
@@ -73,6 +74,12 @@ export async function apply(ctx: Context, config?: Config) {
   })
 
   ctx.on('message-deleted', async (meta) => {
+    if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
+      return
+    }
+    if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
+      return;
+    }
     console.log('deleted', meta.messageId, meta.platform)
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
@@ -91,11 +98,14 @@ export async function apply(ctx: Context, config?: Config) {
         onebot: meta.messageId.toString(),
         deleted: false
       })
-      const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId).discordChannel
+      const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
       if (data) {
-        await dcBot.deleteMessage(discordChannel, data.discord)
+        await dcBot.deleteMessage(discordChannel.discordChannel, data.discord)
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
+        if(discordChannel.discordLogChannel){
+          await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${meta.userId}]撤回消息:\n${data.message}`)
+        }
       }
     }
   })
@@ -116,7 +126,7 @@ export async function apply(ctx: Context, config?: Config) {
       let r = new MessageRelation()
       r.discord = meta.messageId
       r.onebot = sendId
-      r.message = segment.parse(meta.content).filter(v => v.type === "text").map(v => segment.join([v])).join('')
+      r.message = meta.content
       await getConnection().getRepository(MessageRelation).save(r)
     } else {
       const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
@@ -125,7 +135,7 @@ export async function apply(ctx: Context, config?: Config) {
       let r = new MessageRelation()
       r.discord = sentId
       r.onebot = meta.messageId
-      r.message = segment.parse(meta.content).filter(v => v.type === "text").map(v => segment.join([v])).join('')
+      r.message = meta.content
       await getConnection().getRepository(MessageRelation).save(r)
     }
   })
@@ -202,6 +212,9 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     if (v.type === 'text') {
       return segment.unescape(v.data.content)
     }
+    if(v.type === 'image' && v.data.type === 'flash'){
+      return ''
+    }
     return segment.join([v]).trim()
   }).join('')
   contents = contents.replace(/@everyone/, () => '@ everyone').replace(/@here/, () => '@ here')
@@ -210,7 +223,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     embeds.push({
       description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
       footer: {
-        text: quote.message
+        text: segment.parse(quote.message).filter(v => v.type === "text").map(v => segment.join([v])).join('')
       }
     })
   }
