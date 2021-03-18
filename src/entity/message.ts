@@ -1,12 +1,15 @@
-import { Column, Entity, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, OneToMany, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm";
+import DiscordId from "./discordId";
 
 @Entity()
 export class MessageRelation {
     @PrimaryGeneratedColumn()
     id: number
 
-    @Column()
-    discord: string
+    @OneToMany(() => DiscordId, d => d.relation, {
+        cascade: true
+    })
+    discordIds: DiscordId[];
 
     @Column()
     onebot: string

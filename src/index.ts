@@ -8,6 +8,7 @@ import { Logger, segment } from 'koishi-utils'
 import { createConnection, getConnection } from 'typeorm'
 import { MessageRelation } from './entity/message'
 import { Embed } from 'koishi-adapter-discord/dist/types'
+import DiscordId from './entity/discordId'
 require('dotenv').config()
 
 interface RelayRelation {
@@ -43,7 +44,7 @@ export async function apply(ctx: Context, config?: Config) {
     password,
     database,
     synchronize: process.env.NODE_ENV !== 'development',
-    entities: [MessageRelation]
+    entities: [MessageRelation, DiscordId]
   })
 
   ctx.on('message-updated', async (meta) => {
@@ -53,10 +54,15 @@ export async function apply(ctx: Context, config?: Config) {
 
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-      let data = await getConnection().getRepository(MessageRelation).findOne({
-        discord: meta.messageId,
-        deleted: false
-      })
+      let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
+        .leftJoinAndSelect("mr.discordIds", "discordId")
+        .where('discordId.id = :discord')
+        .andWhere("deleted = :deleted")
+        .setParameters({
+          discord: meta.messageId,
+          deleted: false
+        })
+        .getOne()
       const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
       if (data) {
         data.deleted = true
@@ -83,10 +89,15 @@ export async function apply(ctx: Context, config?: Config) {
     console.log('deleted', meta.messageId, meta.platform)
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-      let data = await getConnection().getRepository(MessageRelation).findOne({
-        discord: meta.messageId,
-        deleted: false
-      })
+      let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
+        .leftJoinAndSelect("mr.discordIds", "discordId")
+        .where('discordId.id = :discord')
+        .andWhere("deleted = :deleted")
+        .setParameters({
+          discord: meta.messageId,
+          deleted: false
+        })
+        .getOne()
       if (data) {
         await onebot.deleteMessage('', data.onebot)
         data.deleted = true
@@ -95,15 +106,20 @@ export async function apply(ctx: Context, config?: Config) {
     } else {
       const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       let data = await getConnection().getRepository(MessageRelation).findOne({
-        onebot: meta.messageId.toString(),
-        deleted: false
+        where: {
+          onebot: meta.messageId.toString(),
+          deleted: false
+        },
+        relations: ["discordIds"]
       })
       const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
       if (data) {
-        await dcBot.deleteMessage(discordChannel.discordChannel, data.discord)
+        for (const msgId of data.discordIds) {
+          await dcBot.deleteMessage(discordChannel.discordChannel, msgId.id)
+        }
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
-        if(discordChannel.discordLogChannel){
+        if (discordChannel.discordLogChannel) {
           await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${meta.userId}]撤回消息:\n${data.message}`)
         }
       }
@@ -124,7 +140,11 @@ export async function apply(ctx: Context, config?: Config) {
 
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
-      r.discord = meta.messageId
+      r.discordIds = meta.messageId.split(",").map(v => {
+        let a = new DiscordId()
+        a.id = v
+        return a
+      })
       r.onebot = sendId
       r.message = meta.content
       await getConnection().getRepository(MessageRelation).save(r)
@@ -133,7 +153,11 @@ export async function apply(ctx: Context, config?: Config) {
       const data = await adaptOnebotMessage(meta)
       let sentId = await dcBot.executeWebhook(relation.webhookId, relation.webhookToken, data, true)
       let r = new MessageRelation()
-      r.discord = sentId
+      r.discordIds = sentId.split(",").map(v => {
+        let a = new DiscordId()
+        a.id = v
+        return a
+      })
       r.onebot = meta.messageId
       r.message = meta.content
       await getConnection().getRepository(MessageRelation).save(r)
@@ -169,13 +193,17 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     })
     return rtn
   }) + contents
-  
+
   let quotePrefix = ""
   let quoteObj: MessageRelation | null;
   if (meta.quote) {
-    quoteObj = await getConnection().getRepository(MessageRelation).findOne({
-      discord: meta.quote.messageId
-    })
+    quoteObj = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
+      .leftJoinAndSelect("mr.discordIds", "discordId")
+      .where('discordId.id = :discord')
+      .setParameters({
+        discord: meta.quote.messageId
+      })
+      .getOne()
     quotePrefix = segment('reply', { id: quoteObj.onebot })
   }
   let username = ""
@@ -193,10 +221,12 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
   let quote: MessageRelation | null = null;
   if (quoteObj) {
     quote = await getConnection().getRepository(MessageRelation).findOne({
-      onebot: quoteObj.data.id
+      where: {
+        onebot: quoteObj.data.id
+      }, relations: ["discordIds"]
     })
     if (quote) {
-      quoteId = quote.discord
+      quoteId = quote.discordIds[0].id
     } else {
       console.log('quote not found')
     }
@@ -212,7 +242,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     if (v.type === 'text') {
       return segment.unescape(v.data.content)
     }
-    if(v.type === 'image' && v.data.type === 'flash'){
+    if (v.type === 'image' && v.data.type === 'flash') {
       return ''
     }
     return segment.join([v]).trim()
