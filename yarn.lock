@@ -66,9 +66,9 @@
   integrity sha512-Q1y515GcOdTHgagaVFhHnIFQ38ygs/kmxdNpvpou+raI9UO3YZcHDngBSYKQklcKlvA7iuQlmIKbzvmxcOE9CQ==
 
 "@types/express-serve-static-core@^4.17.18":
-  version "4.17.18"
-  resolved "https://registry.yarnpkg.com/@types/express-serve-static-core/-/express-serve-static-core-4.17.18.tgz#8371e260f40e0e1ca0c116a9afcd9426fa094c40"
-  integrity sha512-m4JTwx5RUBNZvky/JJ8swEJPKFd8si08pPF2PfizYjGZOKr/svUWPcoUmLow6MmPzhasphB7gSTINY67xn3JNA==
+  version "4.17.19"
+  resolved "https://registry.yarnpkg.com/@types/express-serve-static-core/-/express-serve-static-core-4.17.19.tgz#00acfc1632e729acac4f1530e9e16f6dd1508a1d"
+  integrity sha512-DJOSHzX7pCiSElWaGR8kCprwibCB/3yW6vcT8VG3P0SJjnv19gnWG/AZMfM60Xj/YJIp/YCaDHyvzsFVeniARA==
   dependencies:
     "@types/node" "*"
     "@types/qs" "*"
@@ -284,6 +284,14 @@ cache-content-type@^1.0.0:
   dependencies:
     mime-types "^2.1.18"
     ylru "^1.2.0"
+
+call-bind@^1.0.0:
+  version "1.0.2"
+  resolved "https://registry.yarnpkg.com/call-bind/-/call-bind-1.0.2.tgz#b1d4e89e688119c3c9a903ad30abb2f6a919be3c"
+  integrity sha512-7O+FbCihrB5WGbFYesctwmTKae6rOiIzmz1icreWJ+0aA7LJfuqhEso2T9ncpcFtzMQtzXf2QGGueWJGTYsqrA==
+  dependencies:
+    function-bind "^1.1.1"
+    get-intrinsic "^1.0.2"
 
 chalk@^1.1.1:
   version "1.1.3"
@@ -522,10 +530,24 @@ fs.realpath@^1.0.0:
   resolved "https://registry.yarnpkg.com/fs.realpath/-/fs.realpath-1.0.0.tgz#1504ad2523158caa40db4a2787cb01411994ea4f"
   integrity sha1-FQStJSMVjKpA20onh8sBQRmU6k8=
 
+function-bind@^1.1.1:
+  version "1.1.1"
+  resolved "https://registry.yarnpkg.com/function-bind/-/function-bind-1.1.1.tgz#a56899d3ea3c9bab874bb9773b7c5ede92f4895d"
+  integrity sha512-yIovAzMX49sF8Yl58fSCWJ5svSLuaibPxXQJFLmBObTuCr0Mf1KiPopGM9NiFjiYBCbfaa2Fh6breQ6ANVTI0A==
+
 get-caller-file@^2.0.5:
   version "2.0.5"
   resolved "https://registry.yarnpkg.com/get-caller-file/-/get-caller-file-2.0.5.tgz#4f94412a82db32f36e3b0b9741f8a97feb031f7e"
   integrity sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==
+
+get-intrinsic@^1.0.2:
+  version "1.1.1"
+  resolved "https://registry.yarnpkg.com/get-intrinsic/-/get-intrinsic-1.1.1.tgz#15f59f376f855c446963948f0d24cd3637b4abc6"
+  integrity sha512-kWZrnVM42QCiEA2Ig1bG8zjoIMOgxWwYCEeNdwY6Tv/cOSeGpcoX4pXHfKUxNKVoArnrEr2e9srnAxxGIraS9Q==
+  dependencies:
+    function-bind "^1.1.1"
+    has "^1.0.3"
+    has-symbols "^1.0.1"
 
 glob@^7.1.6:
   version "7.1.6"
@@ -550,6 +572,18 @@ has-flag@^4.0.0:
   version "4.0.0"
   resolved "https://registry.yarnpkg.com/has-flag/-/has-flag-4.0.0.tgz#944771fd9c81c81265c4d6941860da06bb59479b"
   integrity sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==
+
+has-symbols@^1.0.1:
+  version "1.0.2"
+  resolved "https://registry.yarnpkg.com/has-symbols/-/has-symbols-1.0.2.tgz#165d3070c00309752a1236a479331e3ac56f1423"
+  integrity sha512-chXa79rL/UC2KlX17jo3vRGz0azaWEx5tGqZg5pO3NUyEJVB17dMruQlzCCOfUvElghKcm5194+BCRvi2Rv/Gw==
+
+has@^1.0.3:
+  version "1.0.3"
+  resolved "https://registry.yarnpkg.com/has/-/has-1.0.3.tgz#722d7cbfc1f6aa8241f16dd814e011e1f41e8796"
+  integrity sha512-f2dvO0VU6Oej7RkWJGrehjbzMAjFp5/VKPp5tTpWIV4JHHZK1/BxbFRtf/siA2SWTe09caDmVtYYzWEIbBS4zw==
+  dependencies:
+    function-bind "^1.1.1"
 
 highlight.js@^10.0.0:
   version "10.6.0"
@@ -708,18 +742,29 @@ koa@^2.13.1:
     type-is "^1.6.16"
     vary "^1.1.2"
 
-"koishi-adapter-discord@link:../koishi/packages/adapter-discord":
-  version "0.0.0"
-  uid ""
+koishi-adapter-discord@^1.0.4:
+  version "1.0.4"
+  resolved "https://registry.yarnpkg.com/koishi-adapter-discord/-/koishi-adapter-discord-1.0.4.tgz#dc8acd39495d62b98418f25e1489e48c212439ec"
+  integrity sha512-bv9/wtEgkIaqUktnJTWkCn0xZnfdL2I3ugUAv1N9oP6AJ3bIlLFQ4ePtEA2eHdH9LeAJtVBM5crH3nlxAixflg==
+  dependencies:
+    axios "^0.21.1"
+    file-type "^16.3.0"
+    form-data "^4.0.0"
+    ws "^7.4.4"
 
-"koishi-adapter-onebot@link:../koishi/packages/adapter-onebot":
-  version "0.0.0"
-  uid ""
+koishi-adapter-onebot@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.yarnpkg.com/koishi-adapter-onebot/-/koishi-adapter-onebot-3.0.0.tgz#d5431fe3949b5ae9980ad9ee6e9d5175dd0290fd"
+  integrity sha512-jVMEoh9DYAIP8Cv1ir0p2+O5ibGRYYU18kTSqNvtmu+XY5VC86x6WZjx4aFXAg6ibWE22JqqnbRh2M5mJhXmkw==
+  dependencies:
+    axios "^0.21.1"
+    koishi-utils "^4.0.1"
+    ws "^7.4.3"
 
-koishi-core@^3.0.1:
-  version "3.0.1"
-  resolved "https://registry.yarnpkg.com/koishi-core/-/koishi-core-3.0.1.tgz#2e30bbe4a71de9f7128294cd3d3ae26ef649359e"
-  integrity sha512-fVLGh0DJqWuesU/2785O39XZfWrYb6MjwGivbZdfwMNlxlvHXzgzE2EBimP368jPnSfUT0IEJ7MgrRM06lSt/Q==
+koishi-core@^3.2.1:
+  version "3.2.1"
+  resolved "https://registry.yarnpkg.com/koishi-core/-/koishi-core-3.2.1.tgz#cf9ef5d900db6ab27e4df27963fb3e93d403a084"
+  integrity sha512-567+pPoH8i0+aAQs6eY7UtRRRBgZ/hDwHAJA717hu70pedHFM+NgWXtqse+q04TDxVU2yfNpYGYA+TrpufvJ9A==
   dependencies:
     "@koa/router" "^10.0.0"
     "@types/koa-bodyparser" "^4.3.0"
@@ -730,13 +775,20 @@ koishi-core@^3.0.1:
     fastest-levenshtein "^1.0.12"
     koa "^2.13.1"
     koa-bodyparser "^4.3.0"
-    koishi-utils "^4.0.1"
+    koishi-utils "^4.0.2"
     lru-cache "^6.0.0"
 
 koishi-utils@^4.0.1:
   version "4.0.1"
   resolved "https://registry.yarnpkg.com/koishi-utils/-/koishi-utils-4.0.1.tgz#0683c5ed345b571481e441862153e871addc0eb5"
   integrity sha512-vuwdO9XBExwGqHnHOXz0MxNI0zhAX3COogX8em5e0HKj0AcFpsU49iyqWKpyZuFRt3NGNb54iBDnD93Kleq8AQ==
+  dependencies:
+    supports-color "^8.1.1"
+
+koishi-utils@^4.0.2:
+  version "4.0.2"
+  resolved "https://registry.yarnpkg.com/koishi-utils/-/koishi-utils-4.0.2.tgz#9b3357ccb52a81acf9de1fc649f339e55246a6b8"
+  integrity sha512-VmLyuUFFyolMRCZFBw5KTzUicSJcld+SKvt3gCmVgiZpLRTsX62+yguPq1bdz9cR3qQh41IsQ5IFo4+O4AQ2CQ==
   dependencies:
     supports-color "^8.1.1"
 
@@ -820,6 +872,11 @@ object-assign@^4.0.1:
   resolved "https://registry.yarnpkg.com/object-assign/-/object-assign-4.1.1.tgz#2109adc7965887cfc05cbbd442cac8bfbb360863"
   integrity sha1-IQmtx5ZYh8/AXLvUQsrIv7s2CGM=
 
+object-inspect@^1.9.0:
+  version "1.9.0"
+  resolved "https://registry.yarnpkg.com/object-inspect/-/object-inspect-1.9.0.tgz#c90521d74e1127b67266ded3394ad6116986533a"
+  integrity sha512-i3Bp9iTqwhaLZBxGkRfo5ZbE07BQRT7MGu8+nNgwW9ItGp1TzCTw2DLEoWwjClxBjOFI/hWljTAmYGCEwmtnOw==
+
 on-finished@^2.3.0:
   version "2.3.0"
   resolved "https://registry.yarnpkg.com/on-finished/-/on-finished-2.3.0.tgz#20f1336481b083cd75337992a16971aa2d906947"
@@ -887,9 +944,11 @@ process-nextick-args@~2.0.0:
   integrity sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==
 
 qs@^6.5.2:
-  version "6.9.6"
-  resolved "https://registry.yarnpkg.com/qs/-/qs-6.9.6.tgz#26ed3c8243a431b2924aca84cc90471f35d5a0ee"
-  integrity sha512-TIRk4aqYLNoJUbd+g2lEdz5kLWIuTMRagAXxl78Q0RiVjAOugHmeKNGdd3cwo/ktpf9aL9epCfFqWDEKysUlLQ==
+  version "6.10.0"
+  resolved "https://registry.yarnpkg.com/qs/-/qs-6.10.0.tgz#8b6519121ab291c316a3e4d49cecf6d13d8c7fe5"
+  integrity sha512-yjACOWijC6L/kmPZZAsVBNY2zfHSIbpdpL977quseu56/8BZ2LoF5axK2bGhbzhVKt7V9xgWTtpyLbxwIoER0Q==
+  dependencies:
+    side-channel "^1.0.4"
 
 raw-body@^2.3.3:
   version "2.4.1"
@@ -978,6 +1037,15 @@ sha.js@^2.4.11:
   dependencies:
     inherits "^2.0.1"
     safe-buffer "^5.0.1"
+
+side-channel@^1.0.4:
+  version "1.0.4"
+  resolved "https://registry.yarnpkg.com/side-channel/-/side-channel-1.0.4.tgz#efce5c8fdc104ee751b25c58d4290011fa5ea2cf"
+  integrity sha512-q5XPytqFEIKHkGdiMIrY10mvLRvnQh42/+GoBlFW3b2LXLE2xxJpZFdm94we0BaoV3RwJyGqg5wS7epxTv0Zvw==
+  dependencies:
+    call-bind "^1.0.0"
+    get-intrinsic "^1.0.2"
+    object-inspect "^1.9.0"
 
 sprintf-js@~1.0.2:
   version "1.0.3"
@@ -1167,7 +1235,7 @@ wrappy@1:
   resolved "https://registry.yarnpkg.com/wrappy/-/wrappy-1.0.2.tgz#b5243d8f3ec1aa35f1364605bc0d1036e30ab69f"
   integrity sha1-tSQ9jz7BqjXxNkYFvA0QNuMKtp8=
 
-ws@^7.4.4:
+ws@^7.4.3, ws@^7.4.4:
   version "7.4.4"
   resolved "https://registry.yarnpkg.com/ws/-/ws-7.4.4.tgz#383bc9742cb202292c9077ceab6f6047b17f2d59"
   integrity sha512-Qm8k8ojNQIMx7S+Zp8u/uHOx7Qazv3Yv4q68MiWWWOJhiwG5W3x7iqmRtJo8xxrciZUY4vRxUTJCKuRnF28ZZw==

@@ -1,11 +1,12 @@
 {
   "name": "koishi-plugin-dcqq-relay",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "main": "dist/index.js",
   "repository": "https://github.com/XxLittleCxX/koishi-plugin-dcqq-relay",
   "author": "LittleC <i@ltlec.cn>",
   "scripts": {
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "build": "tsc"
   },
   "typings": "dist/index.d.ts",
   "files": [
@@ -15,11 +16,13 @@
     "typescript": "^4.2.2"
   },
   "dependencies": {
-    "koishi-adapter-discord": "link:/home/littlec/Dev/koishi/packages/adapter-discord",
-    "koishi-core": "^3.0.1",
+    "koishi-adapter-discord": "^1.0.4",
+    "koishi-adapter-onebot": "^3.0.0",
     "mysql": "^2.18.1",
     "reflect-metadata": "^0.1.13",
-    "typeorm": "^0.2.31",
-    "koishi-adapter-onebot": "link:/home/littlec/Dev/koishi/packages/adapter-onebot"
+    "typeorm": "^0.2.31"
+  },
+  "peerDependencies": {
+    "koishi-core": ">=3.0.0"
   }
 }
