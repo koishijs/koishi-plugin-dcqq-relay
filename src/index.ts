@@ -140,7 +140,7 @@ export async function apply(ctx: Context, config?: Config) {
 
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
-      r.discordIds = meta.messageId.split(",").map(v => {
+      r.discordIds = [meta.messageId].map(v => {
         let a = new DiscordId()
         a.id = v
         return a
@@ -153,7 +153,7 @@ export async function apply(ctx: Context, config?: Config) {
       const data = await adaptOnebotMessage(meta)
       let sentId = await dcBot.executeWebhook(relation.webhookId, relation.webhookToken, data, true)
       let r = new MessageRelation()
-      r.discordIds = sentId.split(",").map(v => {
+      r.discordIds = [sentId].map(v => {
         let a = new DiscordId()
         a.id = v
         return a
