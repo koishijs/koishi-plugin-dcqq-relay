@@ -1,14 +1,15 @@
 import 'koishi-adapter-discord'
 import 'koishi-adapter-onebot'
-import { App, Context, Session } from 'koishi-core'
+import {Context, Session} from 'koishi-core'
 import 'reflect-metadata'
-import { CQBot } from 'koishi-adapter-onebot/dist/bot'
-import { DiscordBot } from 'koishi-adapter-discord/dist/bot'
-import { Logger, segment } from 'koishi-utils'
-import { createConnection, getConnection } from 'typeorm'
-import { MessageRelation } from './entity/message'
-import { Embed } from 'koishi-adapter-discord/dist/types'
+import {CQBot} from 'koishi-adapter-onebot/dist/bot'
+import {DiscordBot} from 'koishi-adapter-discord/dist/bot'
+import {Logger, segment} from 'koishi-utils'
+import {createConnection, getConnection} from 'typeorm'
+import {MessageRelation} from './entity/message'
+import {Embed} from 'koishi-adapter-discord/dist/types'
 import DiscordId from './entity/discordId'
+
 require('dotenv').config()
 
 interface RelayRelation {
@@ -33,7 +34,7 @@ export interface Config {
 }
 
 let c: Config;
-
+const logger = new Logger('relay')
 export async function apply(ctx: Context, config?: Config) {
   const { host, username, password, database } = config.database
   c = config
@@ -43,7 +44,7 @@ export async function apply(ctx: Context, config?: Config) {
     username,
     password,
     database,
-    synchronize: process.env.NODE_ENV !== 'development',
+    synchronize: true,
     entities: [MessageRelation, DiscordId]
   })
 
@@ -71,8 +72,7 @@ export async function apply(ctx: Context, config?: Config) {
           await onebot.deleteMessage('', data.onebot)
         } catch (e) { }
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
-        let sendId = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
-        data.onebot = sendId
+        data.onebot = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
         data.deleted = false
         await getConnection().getRepository(MessageRelation).save(data)
       } else { }
@@ -86,7 +86,6 @@ export async function apply(ctx: Context, config?: Config) {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
-    console.log('deleted', meta.messageId, meta.platform)
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
@@ -228,7 +227,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     if (quote) {
       quoteId = quote.discordIds[0].id
     } else {
-      console.log('quote not found')
+      logger.info('quote not found %s', quoteObj.data.id)
     }
   }
   let embeds: Embed[] = []
@@ -253,7 +252,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     embeds.push({
       description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
       footer: {
-        text: segment.parse(quote.message).filter(v => v.type === "text").map(v => segment.join([v])).join('')
+        text: segment.parse(quote?.message || '').filter(v => v.type === "text").map(v => segment.join([v])).join('')
       }
     })
   }
