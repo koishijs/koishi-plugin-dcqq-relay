@@ -214,6 +214,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   return `${quotePrefix}${username}:\n${contents}`
 }
 const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
+  const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
   let parsed = segment.parse(meta.content)
   const quoteObj = parsed.find(v => v.type === 'quote')
   let quoteId = null
@@ -231,12 +232,13 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     }
   }
   let embeds: Embed[] = []
-  let contents = parsed.map(v => {
+  let contents = (await Promise.all(parsed.map(async v => {
     if (v.type === "quote") {
       return ''
     }
     if (v.type === 'at') {
-      return ''
+      let info = await onebot.$getGroupMemberInfo(meta.groupId, v.data.id)
+      return `@${info.nickname}`
     }
     if (v.type === 'text') {
       return segment.unescape(v.data.content)
@@ -245,7 +247,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       return ''
     }
     return segment.join([v]).trim()
-  }).join('')
+  }))).join('')
   contents = contents.replace(/@everyone/, () => '@ everyone').replace(/@here/, () => '@ here')
   const relation = c.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
   if (quoteId) {
