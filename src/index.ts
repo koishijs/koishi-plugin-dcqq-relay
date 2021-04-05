@@ -180,9 +180,10 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       } else if (v.data.type === 'all') {
         return segment.join([v]).trim()
       }
+  
+      const dcBot = meta.bot as DiscordBot
       if (v.data.id) {
         // @TODO 未来版本会传入raw 如果有大量at 会有性能问题
-        const dcBot = meta.bot as DiscordBot
         let member = await dcBot.$getGuildMember(meta.groupId, v.data.id)
         let username
         
@@ -192,6 +193,10 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
           username = `${member.user.username}#${member.user.discriminator}`
         }
         return `@${username}`
+      }
+      if(v.data.role){
+        let roles = await dcBot.$getGuildRoles(meta.groupId)
+        return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'}`
       }
       return `@${v.data.role || v.data.id}`
     } else if (v.type === "share") {
