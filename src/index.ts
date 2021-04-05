@@ -2,12 +2,11 @@ import 'koishi-adapter-discord'
 import 'koishi-adapter-onebot'
 import {Context, Session} from 'koishi-core'
 import 'reflect-metadata'
-import {CQBot} from 'koishi-adapter-onebot/dist/bot'
-import {DiscordBot} from 'koishi-adapter-discord/dist/bot'
+import {CQBot} from 'koishi-adapter-onebot'
+import {dc, DiscordBot} from 'koishi-adapter-discord'
 import {Logger, segment} from 'koishi-utils'
 import {createConnection, getConnection} from 'typeorm'
 import {MessageRelation} from './entity/message'
-import {Embed} from 'koishi-adapter-discord/dist/types'
 import DiscordId from './entity/discordId'
 
 require('dotenv').config()
@@ -35,8 +34,9 @@ export interface Config {
 
 let c: Config;
 const logger = new Logger('relay')
+
 export async function apply(ctx: Context, config?: Config) {
-  const { host, username, password, database } = config.database
+  const {host, username, password, database} = config.database
   c = config
   await createConnection({
     type: "mysql",
@@ -47,12 +47,12 @@ export async function apply(ctx: Context, config?: Config) {
     synchronize: true,
     entities: [MessageRelation, DiscordId]
   })
-
+  
   ctx.on('message-updated', async (meta) => {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
-
+    
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
@@ -70,15 +70,17 @@ export async function apply(ctx: Context, config?: Config) {
         await getConnection().getRepository(MessageRelation).save(data)
         try {
           await onebot.deleteMessage('', data.onebot)
-        } catch (e) { }
+        } catch (e) {
+        }
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
         data.onebot = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
         data.deleted = false
         await getConnection().getRepository(MessageRelation).save(data)
-      } else { }
+      } else {
+      }
     }
   })
-
+  
   ctx.on('message-deleted', async (meta) => {
     if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
       return
@@ -124,7 +126,7 @@ export async function apply(ctx: Context, config?: Config) {
       }
     }
   })
-
+  
   ctx.on('message', async (meta) => {
     if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
       return
@@ -136,7 +138,7 @@ export async function apply(ctx: Context, config?: Config) {
     if (meta.platform === 'discord') {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       const msg = await adaptMessage(meta)
-
+      
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
       r.discordIds = [meta.messageId].map(v => {
@@ -150,7 +152,7 @@ export async function apply(ctx: Context, config?: Config) {
     } else {
       const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       const data = await adaptOnebotMessage(meta)
-      let sentId = await dcBot.executeWebhook(relation.webhookId, relation.webhookToken, data, true)
+      let sentId = await dcBot.$executeWebhook(relation.webhookId, relation.webhookToken, {...data, tts: false}, true)
       let r = new MessageRelation()
       r.discordIds = [sentId].map(v => {
         let a = new DiscordId()
@@ -165,9 +167,9 @@ export async function apply(ctx: Context, config?: Config) {
 }
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
-  let contents = segment.parse(meta.content).map(v => {
+  let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
     if (v.type === "face") {
-      return segment('image', { file: `https://cdn.discordapp.com/emojis/${v.data.id}` })
+      return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
     } else if (v.type === "file") {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
@@ -178,12 +180,25 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       } else if (v.data.type === 'all') {
         return segment.join([v]).trim()
       }
+      if (v.data.id) {
+        // @TODO 未来版本会传入raw 如果有大量at 会有性能问题
+        const dcBot = meta.bot as DiscordBot
+        let member = await dcBot.$getGuildMember(meta.groupId, v.data.id)
+        let username
+        
+        if (member.nick && member.nick !== member.user.username) {
+          username = `${member.nick}(${member.user.username}#${member.user.discriminator})`
+        } else {
+          username = `${member.user.username}#${member.user.discriminator}`
+        }
+        return `@${username}`
+      }
       return `@${v.data.role || v.data.id}`
     } else if (v.type === "share") {
       return v.data?.title + ' ' + v.data.url
     }
     return segment.join([v]).trim()
-  }).join('')
+  }))).join('')
   contents = meta.discord?.embeds?.map(embed => {
     let rtn = ''
     rtn += embed.description || ''
@@ -192,7 +207,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     })
     return rtn
   }) + contents
-
+  
   let quotePrefix = ""
   let quoteObj: MessageRelation | null;
   if (meta.quote) {
@@ -203,9 +218,9 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         discord: meta.quote.messageId
       })
       .getOne()
-    quotePrefix = segment('reply', { id: quoteObj.onebot })
+    quotePrefix = segment('reply', {id: quoteObj.onebot})
   }
-  let username = ""
+  let username
   if (meta.author.nickname !== meta.author.username) {
     username = `${meta.author.nickname}(${meta.author.username}#${meta.author.discriminator})`
   } else {
@@ -231,7 +246,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       logger.info('quote not found %s', quoteObj.data.id)
     }
   }
-  let embeds: Embed[] = []
+  let embeds: dc.Embed[] = []
   let contents = (await Promise.all(parsed.map(async v => {
     if (v.type === "quote") {
       return ''
