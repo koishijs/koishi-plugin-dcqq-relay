@@ -52,7 +52,9 @@ export async function apply(ctx: Context, config?: Config) {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
-    
+    if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
+      return
+    }
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
@@ -137,8 +139,8 @@ export async function apply(ctx: Context, config?: Config) {
     const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
     if (meta.platform === 'discord') {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
+     // const dcBot = meta.bot as DiscordBot
       const msg = await adaptMessage(meta)
-      
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
       r.discordIds = [meta.messageId].map(v => {
@@ -204,7 +206,8 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     }
     return segment.join([v]).trim()
   }))).join('')
-  contents = meta.discord?.embeds?.map(embed => {
+  const msg = meta.discord.raw as dc.Message
+  contents = msg.embeds.map(embed => {
     let rtn = ''
     rtn += embed.description || ''
     embed.fields?.forEach(field => {
@@ -223,7 +226,9 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         discord: meta.quote.messageId
       })
       .getOne()
-    quotePrefix = segment('reply', {id: quoteObj.onebot})
+    if(quoteObj){
+      quotePrefix = segment('reply', {id: quoteObj.onebot})
+    }
   }
   let username
   if (meta.author.nickname !== meta.author.username) {
