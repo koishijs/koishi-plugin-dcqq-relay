@@ -272,7 +272,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       return `@${info.nickname}`
     }
     if (v.type === 'text') {
-      return segment.unescape(v.data.content)
+      return segment.unescape(v.data.content).trim()
     }
     if (v.type === 'image' && v.data.type === 'flash') {
       return ''
