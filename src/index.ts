@@ -90,6 +90,9 @@ export async function apply(ctx: Context, config?: Config) {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
+    if(meta.content.startsWith("//")){
+      return;
+    }
     if (meta.platform === "discord") {
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
@@ -134,6 +137,9 @@ export async function apply(ctx: Context, config?: Config) {
       return
     }
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
+      return;
+    }
+    if(meta.content.startsWith("//")){
       return;
     }
     const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
