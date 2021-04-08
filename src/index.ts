@@ -175,6 +175,7 @@ export async function apply(ctx: Context, config?: Config) {
 }
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
+  const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
   let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
     if (v.type === "face") {
       return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
@@ -213,7 +214,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     return segment.join([v]).trim()
   }))).join('')
   // @ts-ignore
-  const msg = await meta.bot.$getMessage(meta.channelId, meta.messageId)
+  const msg = await dcBot.request<dc.Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
   contents = msg.embeds.map(embed => {
     let rtn = ''
     rtn += embed.description || ''
