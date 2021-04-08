@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-dcqq-relay",
-  "version": "0.1.1-beta.1",
+  "version": "0.1.1",
   "main": "dist/index.js",
   "repository": "https://github.com/koishijs/koishi-plugin-dcqq-relay",
   "author": "LittleC <i@ltlec.cn>",
