@@ -212,7 +212,8 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     }
     return segment.join([v]).trim()
   }))).join('')
-  const msg = meta.discord.raw as dc.Message
+  // @ts-ignore
+  const msg = await meta.bot.$getMessage(meta.channelId, meta.messageId)
   contents = msg.embeds.map(embed => {
     let rtn = ''
     rtn += embed.description || ''
