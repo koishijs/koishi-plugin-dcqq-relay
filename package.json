@@ -16,11 +16,11 @@
     "typescript": "^4.2.2"
   },
   "dependencies": {
-    "koishi-adapter-discord": "^1.0.7",
-    "koishi-adapter-onebot": "^3.0.5",
+    "koishi-adapter-discord": "^1.0.9",
+    "koishi-adapter-onebot": "^3.0.8",
+    "koishi-core": "^3.9.0",
     "mysql": "^2.18.1",
     "reflect-metadata": "^0.1.13",
-    "typeorm": "^0.2.31",
-    "koishi-core": ">=3.7.0"
+    "typeorm": "^0.2.31"
   }
 }

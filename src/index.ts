@@ -271,7 +271,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     }
     if (v.type === 'at') {
       let info = await onebot.$getGroupMemberInfo(meta.groupId, v.data.id)
-      return `@${info.nickname}`
+      return `@[QQ: ${v.data.id}]${info.nickname} `
     }
     if (v.type === 'text') {
       return segment.unescape(v.data.content).trim()

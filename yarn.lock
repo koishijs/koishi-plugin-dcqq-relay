@@ -175,7 +175,7 @@
     "@types/mime" "^1"
     "@types/node" "*"
 
-"@types/ws@^7.4.0":
+"@types/ws@^7.4.1":
   version "7.4.1"
   resolved "https://registry.yarnpkg.com/@types/ws/-/ws-7.4.1.tgz#49eacb15a0534663d53a36fbf5b4d98f5ae9a73a"
   integrity sha512-ISCK1iFnR+jYv7+jLNX0wDqesZ/5RAeY3wUx6QaphmocphU61h+b+PHjS18TF4WIPTu/MMzxIq2PHr32o2TS5Q==
@@ -742,46 +742,46 @@ koa@^2.13.1:
     type-is "^1.6.16"
     vary "^1.1.2"
 
-koishi-adapter-discord@^1.0.7:
-  version "1.0.7"
-  resolved "https://registry.yarnpkg.com/koishi-adapter-discord/-/koishi-adapter-discord-1.0.7.tgz#7717139e92278706500bb04968ba8ca30a6b1545"
-  integrity sha512-5vAGmUPK6obQ6TGUPtzUDLLHFOc/A7MOr2m7Q9ekqpyBMzJOHkNXWHVR2DoR0qB2jmrfd7eDcdH3sv3Y7LBpTA==
+koishi-adapter-discord@^1.0.9:
+  version "1.0.9"
+  resolved "https://registry.yarnpkg.com/koishi-adapter-discord/-/koishi-adapter-discord-1.0.9.tgz#1dec2a0b5729ee7fbfba9aa41b2b6c6de86da070"
+  integrity sha512-Wx+KwQCbZj3UwzpK16RmQA+LZUlV9N0157CTtTH3kYzqukIZ46+/Jl41aRr2Dqv0zrjT2/X5NOMtAjzFjvQVeg==
   dependencies:
     axios "^0.21.1"
     file-type "^16.3.0"
     form-data "^4.0.0"
     ws "^7.4.4"
 
-koishi-adapter-onebot@^3.0.5:
-  version "3.0.5"
-  resolved "https://registry.yarnpkg.com/koishi-adapter-onebot/-/koishi-adapter-onebot-3.0.5.tgz#714dd055040f61cf599dd17bbbf9ea560352f622"
-  integrity sha512-WFW6EOk0Ygv4o+TiFdPj/q1gy4SUx/gDO5DmntFy/gWqXoM8NXoe7TdnqBq7fd2I3iJv4QzJZjiqmNUuAAY2gw==
+koishi-adapter-onebot@^3.0.8:
+  version "3.0.8"
+  resolved "https://registry.yarnpkg.com/koishi-adapter-onebot/-/koishi-adapter-onebot-3.0.8.tgz#d48e84fb87bfbbed2081653cb03960ff29852f48"
+  integrity sha512-vnLPLGCakMzGLTESxsn3NYJMpBYpqwd5fVAMy7vdKQ/GU6iFcowYQT5N5wfCNEskuoEmvzm7u475Nj0RbYAn0A==
   dependencies:
     axios "^0.21.1"
-    koishi-utils "^4.1.3"
+    koishi-utils "^4.2.0"
     ws "^7.4.4"
 
-koishi-core@>=3.7.0:
-  version "3.7.0"
-  resolved "https://registry.yarnpkg.com/koishi-core/-/koishi-core-3.7.0.tgz#03c8365271d55446be9f3ed9977871eac1074cab"
-  integrity sha512-7CRZxBMwm19lP6IMunNudsQhh6JZ0In8FPXsM81piMIQr5/Qk61/ycKWOAwa3PlRrDMQ+QAe9QUhl/oNTnzKiw==
+koishi-core@^3.9.0:
+  version "3.9.1"
+  resolved "https://registry.yarnpkg.com/koishi-core/-/koishi-core-3.9.1.tgz#e5d140c903aa6ed3876793efcbc122e09950169c"
+  integrity sha512-fUUx55AxFszcjc+/BGpUnVLVDse1Jt6E9jS+j9g2XPWAstF1LzPDQNJNdDyGRkuDAhipl8xzjomw7f6MzeBoBQ==
   dependencies:
     "@koa/router" "^10.0.0"
     "@types/koa-bodyparser" "^4.3.0"
     "@types/koa__router" "^8.0.4"
     "@types/lru-cache" "^5.1.0"
-    "@types/ws" "^7.4.0"
+    "@types/ws" "^7.4.1"
     axios "^0.21.1"
     fastest-levenshtein "^1.0.12"
     koa "^2.13.1"
     koa-bodyparser "^4.3.0"
-    koishi-utils "^4.1.3"
+    koishi-utils "^4.2.0"
     lru-cache "^6.0.0"
 
-koishi-utils@^4.1.3:
-  version "4.1.3"
-  resolved "https://registry.yarnpkg.com/koishi-utils/-/koishi-utils-4.1.3.tgz#bd14ddeadc4d7baaddf0fcb675ba2885e6b677aa"
-  integrity sha512-sezXWLaTKaMzgRQ8zg/gxgWHEeC/EOXmaGokPyGm1CjMGsZeRA3prknCCvp7WAY+bAo26rGT6E3jM+GwJld6jw==
+koishi-utils@^4.2.0:
+  version "4.2.0"
+  resolved "https://registry.yarnpkg.com/koishi-utils/-/koishi-utils-4.2.0.tgz#af6104965ce27ccd16dbdbbbf9ad2db4737a219d"
+  integrity sha512-6WZh+mypx1jQXCy/xQFM5Y1/DquqACoQ8qEpnxW8Yod2XuxlGTADUVl40O3btSS2mbA4C8I6pp20wWKB54ITjg==
   dependencies:
     supports-color "^8.1.1"
 
