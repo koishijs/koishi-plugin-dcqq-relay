@@ -176,6 +176,9 @@ export async function apply(ctx: Context, config?: Config) {
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+  const msg = await dcBot.request<dc.Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
+  let roles: dc.Role[] = undefined
+  let members: Record<dc.snowflake, dc.GuildMember> = {}
   let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
     if (v.type === "face") {
       return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
@@ -183,7 +186,11 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
       return `[视频: ${v.data.file}]`
-    } else if (v.type === 'at') {
+    } else if(v.type === "sharp"){
+      let channel = await dcBot.$getChannel(v.data.id)
+      return `[频道: ${channel.name}(${v.data.id})]`
+    }
+    else if (v.type === 'at') {
       if (v.data.type === "here") {
         return `@${v.data.type}`
       } else if (v.data.type === 'all') {
@@ -192,8 +199,8 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   
       const dcBot = meta.bot as DiscordBot
       if (v.data.id) {
-        // @TODO 未来版本会传入raw 如果有大量at 会有性能问题
-        let member = await dcBot.$getGuildMember(meta.groupId, v.data.id)
+        let member = members[v.data.id] || await dcBot.$getGuildMember(meta.groupId, v.data.id)
+        members[v.data.id] = member
         let username
         
         if (member.nick && member.nick !== member.user.username) {
@@ -201,20 +208,18 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         } else {
           username = `${member.user.username}#${member.user.discriminator}`
         }
-        return `@${username}`
+        return `@${username} `
       }
       if(v.data.role){
-        let roles = await dcBot.$getGuildRoles(meta.groupId)
-        return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'}`
+        roles = roles || await dcBot.$getGuildRoles(meta.groupId)
+        return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'} `
       }
-      return `@${v.data.role || v.data.id}`
+      return ''
     } else if (v.type === "share") {
       return v.data?.title + ' ' + v.data.url
     }
     return segment.join([v]).trim()
   }))).join('')
-  // @ts-ignore
-  const msg = await dcBot.request<dc.Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
   contents = msg.embeds.map(embed => {
     let rtn = ''
     rtn += embed.description || ''
@@ -281,7 +286,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     }
     return segment.join([v]).trim()
   }))).join('')
-  contents = contents.replace(/@everyone/, () => '@ everyone').replace(/@here/, () => '@ here')
+  contents = contents.replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
   const relation = c.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
   if (quoteId) {
     embeds.push({
