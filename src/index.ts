@@ -56,6 +56,7 @@ export async function apply(ctx: Context, config?: Config) {
       return
     }
     if (meta.platform === "discord") {
+      await meta.preprocess()
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
         .leftJoinAndSelect("mr.discordIds", "discordId")
@@ -90,7 +91,7 @@ export async function apply(ctx: Context, config?: Config) {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
-    if(meta.content.startsWith("//")){
+    if (meta.content.startsWith("//")) {
       return;
     }
     if (meta.platform === "discord") {
@@ -139,13 +140,14 @@ export async function apply(ctx: Context, config?: Config) {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
-    if(meta.content.startsWith("//")){
+    if (meta.content.startsWith("//")) {
       return;
     }
     const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
     if (meta.platform === 'discord') {
+      await meta.preprocess()
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-     // const dcBot = meta.bot as DiscordBot
+      // const dcBot = meta.bot as DiscordBot
       const msg = await adaptMessage(meta)
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
       let r = new MessageRelation()
@@ -186,17 +188,16 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
       return `[视频: ${v.data.file}]`
-    } else if(v.type === "sharp"){
+    } else if (v.type === "sharp") {
       let channel = await dcBot.$getChannel(v.data.id)
       return `[频道: ${channel.name}(${v.data.id})]`
-    }
-    else if (v.type === 'at') {
+    } else if (v.type === 'at') {
       if (v.data.type === "here") {
         return `@${v.data.type}`
       } else if (v.data.type === 'all') {
         return segment.join([v]).trim()
       }
-  
+      
       const dcBot = meta.bot as DiscordBot
       if (v.data.id) {
         let member = members[v.data.id] || await dcBot.$getGuildMember(meta.groupId, v.data.id)
@@ -210,13 +211,15 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         }
         return `@${username} `
       }
-      if(v.data.role){
+      if (v.data.role) {
         roles = roles || await dcBot.$getGuildRoles(meta.groupId)
         return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'} `
       }
       return ''
     } else if (v.type === "share") {
       return v.data?.title + ' ' + v.data.url
+    } else if (v.type === 'quote') {
+      return ''
     }
     return segment.join([v]).trim()
   }))).join('')
@@ -239,7 +242,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         discord: meta.quote.messageId
       })
       .getOne()
-    if(quoteObj){
+    if (quoteObj) {
       quotePrefix = segment('reply', {id: quoteObj.onebot})
     }
   }
@@ -275,6 +278,9 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       return ''
     }
     if (v.type === 'at') {
+      if(v.data.id === onebot.selfId){
+        return ''
+      }
       let info = await onebot.$getGroupMemberInfo(meta.groupId, v.data.id)
       return `@[QQ: ${v.data.id}]${info.nickname} `
     }
@@ -282,6 +288,9 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       return segment.unescape(v.data.content).trim()
     }
     if (v.type === 'image' && v.data.type === 'flash') {
+      return ''
+    }
+    if (v.type === 'reply') {
       return ''
     }
     return segment.join([v]).trim()
