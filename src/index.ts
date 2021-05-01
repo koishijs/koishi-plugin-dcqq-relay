@@ -85,17 +85,7 @@ export async function apply(ctx: Context, config?: Config) {
   })
   
   ctx.on('message-deleted', async (meta) => {
-    if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
-      return
-    }
-    if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
-      return;
-    }
-    if (meta.content.startsWith("//")) {
-      return;
-    }
     if (meta.platform === "discord") {
-      const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
       let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
         .leftJoinAndSelect("mr.discordIds", "discordId")
         .where('discordId.id = :discord')
@@ -106,12 +96,12 @@ export async function apply(ctx: Context, config?: Config) {
         })
         .getOne()
       if (data) {
+        const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
         await onebot.deleteMessage('', data.onebot)
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
       }
     } else {
-      const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       let data = await getConnection().getRepository(MessageRelation).findOne({
         where: {
           onebot: meta.messageId.toString(),
@@ -119,8 +109,9 @@ export async function apply(ctx: Context, config?: Config) {
         },
         relations: ["discordIds"]
       })
-      const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
       if (data) {
+        const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
+        const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
         for (const msgId of data.discordIds) {
           await dcBot.deleteMessage(discordChannel.discordChannel, msgId.id)
         }
