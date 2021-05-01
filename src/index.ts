@@ -96,10 +96,14 @@ export async function apply(ctx: Context, config?: Config) {
         })
         .getOne()
       if (data) {
-        const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-        await onebot.deleteMessage('', data.onebot)
         data.deleted = true
         await getConnection().getRepository(MessageRelation).save(data)
+        const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
+        try {
+          await onebot.deleteMessage('', data.onebot)
+        } catch (e) {
+        
+        }
       }
     } else {
       let data = await getConnection().getRepository(MessageRelation).findOne({
@@ -110,13 +114,17 @@ export async function apply(ctx: Context, config?: Config) {
         relations: ["discordIds"]
       })
       if (data) {
+        data.deleted = true
+        await getConnection().getRepository(MessageRelation).save(data)
         const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
         const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
         for (const msgId of data.discordIds) {
-          await dcBot.deleteMessage(discordChannel.discordChannel, msgId.id)
+          try {
+            await dcBot.deleteMessage(discordChannel.discordChannel, msgId.id)
+          } catch (e) {
+          
+          }
         }
-        data.deleted = true
-        await getConnection().getRepository(MessageRelation).save(data)
         if (discordChannel.discordLogChannel) {
           await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${meta.userId}]撤回消息:\n${data.message}`)
         }
@@ -269,7 +277,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       return ''
     }
     if (v.type === 'at') {
-      if(v.data.id === onebot.selfId){
+      if (v.data.id === onebot.selfId) {
         return ''
       }
       let info = await onebot.$getGroupMemberInfo(meta.groupId, v.data.id)
