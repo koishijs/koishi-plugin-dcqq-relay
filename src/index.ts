@@ -173,6 +173,11 @@ export async function apply(ctx: Context, config?: Config) {
       await getConnection().getRepository(MessageRelation).save(r)
     }
   })
+  
+  ctx.command('relay', '查看同步插件帮助信息', {
+    minInterval: 10000
+  })
+    .action(() => `仓库地址: https://github.com/koishijs/koishi-plugin-dcqq-relay`)
 }
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
