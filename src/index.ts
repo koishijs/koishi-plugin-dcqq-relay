@@ -10,6 +10,9 @@ import {MessageRelation} from './entity/message'
 import DiscordId from './entity/discordId'
 import {Embed, GuildMember, Message, Role, snowflake} from "koishi-adapter-discord/lib/types";
 
+// @ts-ignore
+import {data} from 'qface'
+
 require('dotenv').config()
 
 interface RelayRelation {
@@ -297,6 +300,10 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     }
     if (v.type === 'reply') {
       return ''
+    }
+    if (v.type === 'face') {
+      let alt = data.find(face => face.QSid === v.data.id)
+      return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${v.data.id}]`
     }
     return segment.join([v]).trim()
   }))).join('')
