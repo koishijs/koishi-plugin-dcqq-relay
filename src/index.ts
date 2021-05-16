@@ -3,11 +3,12 @@ import 'koishi-adapter-onebot'
 import {Context, Session} from 'koishi-core'
 import 'reflect-metadata'
 import {CQBot} from 'koishi-adapter-onebot'
-import {dc, DiscordBot} from 'koishi-adapter-discord'
+import {DiscordBot} from 'koishi-adapter-discord'
 import {Logger, segment} from 'koishi-utils'
 import {createConnection, getConnection} from 'typeorm'
 import {MessageRelation} from './entity/message'
 import DiscordId from './entity/discordId'
+import {Embed, GuildMember, Message, Role, snowflake} from "koishi-adapter-discord/lib/types";
 
 require('dotenv').config()
 
@@ -182,9 +183,9 @@ export async function apply(ctx: Context, config?: Config) {
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
-  const msg = await dcBot.request<dc.Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
-  let roles: dc.Role[] = undefined
-  let members: Record<dc.snowflake, dc.GuildMember> = {}
+  const msg = await dcBot.request<Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
+  let roles: Role[] = undefined
+  let members: Record<snowflake, GuildMember> = {}
   let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
     if (v.type === "face") {
       return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
@@ -276,7 +277,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       logger.info('quote not found %s', quoteObj.data.id)
     }
   }
-  let embeds: dc.Embed[] = []
+  let embeds: Embed[] = []
   let contents = (await Promise.all(parsed.map(async v => {
     if (v.type === "quote") {
       return ''

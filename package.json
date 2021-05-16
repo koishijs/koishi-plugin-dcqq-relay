@@ -2,6 +2,7 @@
   "name": "koishi-plugin-dcqq-relay",
   "version": "0.1.4",
   "main": "dist/index.js",
+  "description": "Synchronize messages between discord and qq",
   "repository": "https://github.com/koishijs/koishi-plugin-dcqq-relay",
   "author": "LittleC <i@ltlec.cn>",
   "scripts": {
@@ -13,14 +14,20 @@
     "dist"
   ],
   "devDependencies": {
-    "typescript": "^4.2.2"
+    "typescript": "^4.2.2",
+    "koishi-adapter-discord": "^1.1.3",
+    "koishi-adapter-onebot": "^3.0.9",
+    "koishi-core": "^3.11.0"
   },
   "dependencies": {
-    "koishi-adapter-discord": "1.0.9",
-    "koishi-adapter-onebot": "^3.0.8",
-    "koishi-core": "^3.9.0",
+    "koishi-core": "^3.11.0",
     "mysql": "^2.18.1",
     "reflect-metadata": "^0.1.13",
-    "typeorm": "^0.2.31"
+    "typeorm": "^0.2.32"
+  },
+  "peerDependencies": {
+    "koishi-adapter-discord": "^1.1.3",
+    "koishi-adapter-onebot": "^3.0.9",
+    "koishi-core": "^3.11.0"
   }
 }
