@@ -42,17 +42,18 @@ declare module 'koishi-core' {
   }
 }
 
-export async function apply(ctx: Context, config?: Config) {
-  Tables.extend('dcqqRelay')
-  Database.extend('koishi-plugin-mysql', ({ tables }) => {
-    tables.dcqqRelay = {
-      id: 'INT(10) UNSIGNED NOT NULL AUTO_INCREMENT',
-      dcId: 'VARCHAR(18) NOT NULL',
-      onebotId: 'INT(11)'
-    }
-  })
-  c = config
+Tables.extend('dcqqRelay')
+Database.extend('koishi-plugin-mysql', ({ tables }) => {
+  tables.dcqqRelay = {
+    id: 'INT(10) UNSIGNED NOT NULL AUTO_INCREMENT',
+    dcId: 'VARCHAR(18) NOT NULL',
+    onebotId: 'INT(11)',
+    message: "MEDIUMTEXT"
+  }
+})
 
+export async function apply(ctx: Context, config?: Config) {
+  c = config
   ctx.on('message-updated', async (meta) => {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
