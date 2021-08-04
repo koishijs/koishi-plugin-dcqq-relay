@@ -1,19 +1,14 @@
 import 'koishi-adapter-discord'
 import 'koishi-adapter-onebot'
-import {Context, Session} from 'koishi-core'
-import 'reflect-metadata'
-import {CQBot} from 'koishi-adapter-onebot'
-import {DiscordBot} from 'koishi-adapter-discord'
-import {Logger, segment} from 'koishi-utils'
-import {createConnection, getConnection} from 'typeorm'
-import {MessageRelation} from './entity/message'
-import DiscordId from './entity/discordId'
-import {Embed, GuildMember, Message, Role, snowflake} from "koishi-adapter-discord/lib/types";
-
+import { Context, Database, Session, Tables } from 'koishi-core'
+import { CQBot } from 'koishi-adapter-onebot'
+import { DiscordBot } from 'koishi-adapter-discord'
+import { Logger, segment } from 'koishi-utils'
+import { Embed, GuildMember, Message, Role, snowflake } from "koishi-adapter-discord/lib/types";
+import type { } from 'koishi-plugin-mongo'
+import type { } from 'koishi-plugin-mysql'
 // @ts-ignore
-import {data} from 'qface'
-
-require('dotenv').config()
+import { data } from 'qface'
 
 interface RelayRelation {
   discordChannel: string;
@@ -25,12 +20,6 @@ interface RelayRelation {
 }
 
 export interface Config {
-  database: {
-    host: string;
-    username: string;
-    password: string;
-    database: string;
-  }
   onebotSelfId: string;
   discordToken: string;
   relations: RelayRelation[]
@@ -39,19 +28,31 @@ export interface Config {
 let c: Config;
 const logger = new Logger('relay')
 
+export interface RelayTable {
+  id: number
+  dcId: string;
+  onebotId: string;
+  deleted: boolean;
+  message: string;
+}
+
+declare module 'koishi-core' {
+  interface Tables {
+    dcqqRelay: RelayTable
+  }
+}
+
 export async function apply(ctx: Context, config?: Config) {
-  const {host, username, password, database} = config.database
-  c = config
-  await createConnection({
-    type: "mysql",
-    host,
-    username,
-    password,
-    database,
-    synchronize: true,
-    entities: [MessageRelation, DiscordId]
+  Tables.extend('dcqqRelay')
+  Database.extend('koishi-plugin-mysql', ({ tables }) => {
+    tables.dcqqRelay = {
+      id: 'INT(10) UNSIGNED NOT NULL AUTO_INCREMENT',
+      dcId: 'VARCHAR(18) NOT NULL',
+      onebotId: 'INT(11)'
+    }
   })
-  
+  c = config
+
   ctx.on('message-updated', async (meta) => {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
@@ -62,80 +63,56 @@ export async function apply(ctx: Context, config?: Config) {
     if (meta.platform === "discord") {
       await meta.preprocess()
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-      let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
-        .leftJoinAndSelect("mr.discordIds", "discordId")
-        .where('discordId.id = :discord')
-        .andWhere("deleted = :deleted")
-        .setParameters({
-          discord: meta.messageId,
-          deleted: false
-        })
-        .getOne()
+      let data = await ctx.database.get('dcqqRelay', { dcId: [meta.messageId], deleted: [false] })
       const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
-      if (data) {
-        data.deleted = true
-        await getConnection().getRepository(MessageRelation).save(data)
+      if (data.length) {
+        data[0].deleted = true
+        await ctx.database.update('dcqqRelay', data)
         try {
-          await onebot.deleteMessage('', data.onebot)
+          await onebot.deleteMessage('', data[0].onebotId)
         } catch (e) {
         }
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
-        data.onebot = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
-        data.deleted = false
-        await getConnection().getRepository(MessageRelation).save(data)
+        data[0].onebotId = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
+        data[0].deleted = false
+        await ctx.database.update('dcqqRelay', data)
       } else {
       }
     }
   })
-  
+
   ctx.on('message-deleted', async (meta) => {
     if (meta.platform === "discord") {
-      let data = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
-        .leftJoinAndSelect("mr.discordIds", "discordId")
-        .where('discordId.id = :discord')
-        .andWhere("deleted = :deleted")
-        .setParameters({
-          discord: meta.messageId,
-          deleted: false
-        })
-        .getOne()
-      if (data) {
-        data.deleted = true
-        await getConnection().getRepository(MessageRelation).save(data)
+      let data = await ctx.database.get('dcqqRelay', { dcId: [meta.messageId], deleted: [false] })
+      if (data.length) {
+        data[0].deleted = true
+        await ctx.database.update('dcqqRelay', data)
         const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
         try {
-          await onebot.deleteMessage('', data.onebot)
+          await onebot.deleteMessage('', data[0].onebotId)
         } catch (e) {
-        
+
         }
       }
     } else {
-      let data = await getConnection().getRepository(MessageRelation).findOne({
-        where: {
-          onebot: meta.messageId.toString(),
-          deleted: false
-        },
-        relations: ["discordIds"]
-      })
-      if (data) {
-        data.deleted = true
-        await getConnection().getRepository(MessageRelation).save(data)
+      let data = await ctx.database.get('dcqqRelay', { onebotId: [meta.messageId.toString()], deleted: [false] })
+      if (data.length) {
+        data[0].deleted = true
+        await ctx.database.update('dcqqRelay', data)
         const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
         const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
-        for (const msgId of data.discordIds) {
-          try {
-            await dcBot.deleteMessage(discordChannel.discordChannel, msgId.id)
-          } catch (e) {
-          
-          }
+        try {
+          await dcBot.deleteMessage(discordChannel.discordChannel, data[0].dcId)
+        } catch (e) {
+
         }
         if (discordChannel.discordLogChannel) {
-          await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${meta.userId}]撤回消息:\n${data.message}`)
+          await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${meta.userId}]撤回消息:\n${data[0].message}`)
         }
       }
     }
   })
-  
+
   ctx.on('message', async (meta) => {
     if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
       return
@@ -153,31 +130,23 @@ export async function apply(ctx: Context, config?: Config) {
       // const dcBot = meta.bot as DiscordBot
       const msg = await adaptMessage(meta)
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
-      let r = new MessageRelation()
-      r.discordIds = [meta.messageId].map(v => {
-        let a = new DiscordId()
-        a.id = v
-        return a
+      await ctx.database.create('dcqqRelay', {
+        onebotId: sendId,
+        message: meta.content,
+        dcId: meta.messageId
       })
-      r.onebot = sendId
-      r.message = meta.content
-      await getConnection().getRepository(MessageRelation).save(r)
     } else {
       const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       const data = await adaptOnebotMessage(meta)
-      let sentId = await dcBot.$executeWebhook(relation.webhookId, relation.webhookToken, {...data, tts: false}, true)
-      let r = new MessageRelation()
-      r.discordIds = [sentId].map(v => {
-        let a = new DiscordId()
-        a.id = v
-        return a
+      let sentId = await dcBot.$executeWebhook(relation.webhookId, relation.webhookToken, { ...data, tts: false }, true)
+      await ctx.database.create('dcqqRelay', {
+        onebotId: meta.messageId,
+        message: meta.content,
+        dcId: sentId
       })
-      r.onebot = meta.messageId
-      r.message = meta.content
-      await getConnection().getRepository(MessageRelation).save(r)
     }
   })
-  
+
   ctx.command('relay', '查看同步插件帮助信息', {
     minInterval: 10000
   })
@@ -191,7 +160,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   let members: Record<snowflake, GuildMember> = {}
   let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
     if (v.type === "face") {
-      return segment('image', {file: `https://cdn.discordapp.com/emojis/${v.data.id}`})
+      return segment('image', { file: `https://cdn.discordapp.com/emojis/${v.data.id}` })
     } else if (v.type === "file") {
       return `[文件: ${v.data.file}]`
     } else if (v.type === "video") {
@@ -205,13 +174,13 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
       } else if (v.data.type === 'all') {
         return segment.join([v]).trim()
       }
-      
+
       const dcBot = meta.bot as DiscordBot
       if (v.data.id) {
         let member = members[v.data.id] || await dcBot.$getGuildMember(meta.groupId, v.data.id)
         members[v.data.id] = member
         let username
-        
+
         if (member.nick && member.nick !== member.user.username) {
           username = `${member.nick}(${member.user.username}#${member.user.discriminator})`
         } else {
@@ -239,19 +208,14 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     })
     return rtn
   }) + contents
-  
+
   let quotePrefix = ""
-  let quoteObj: MessageRelation | null;
   if (meta.quote) {
-    quoteObj = await getConnection().getRepository(MessageRelation).createQueryBuilder("mr")
-      .leftJoinAndSelect("mr.discordIds", "discordId")
-      .where('discordId.id = :discord')
-      .setParameters({
-        discord: meta.quote.messageId
-      })
-      .getOne()
-    if (quoteObj) {
-      quotePrefix = segment('reply', {id: quoteObj.onebot})
+    let quote = await meta.database.get('dcqqRelay', {
+      dcId: [meta.quote.messageId]
+    })
+    if (quote.length) {
+      quotePrefix = segment('reply', { id: quote[0].onebotId })
     }
   }
   let username
@@ -267,15 +231,14 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
   let parsed = segment.parse(meta.content)
   const quoteObj = parsed.find(v => v.type === 'quote')
   let quoteId = null
-  let quote: MessageRelation | null = null;
+  let _quote: any;
   if (quoteObj) {
-    quote = await getConnection().getRepository(MessageRelation).findOne({
-      where: {
-        onebot: quoteObj.data.id
-      }, relations: ["discordIds"]
+    let quote = await meta.database.get('dcqqRelay', {
+      onebotId: [quoteObj.data.id]
     })
-    if (quote) {
-      quoteId = quote.discordIds[0].id
+    if (quote.length) {
+      quoteId = quote[0].dcId
+      _quote = quote[0]
     } else {
       logger.info('quote not found %s', quoteObj.data.id)
     }
@@ -313,7 +276,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
     embeds.push({
       description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
       footer: {
-        text: segment.parse(quote?.message || '').filter(v => v.type === "text").map(v => segment.join([v])).join('')
+        text: segment.parse(_quote?.message || '').filter(v => v.type === "text").map(v => segment.join([v])).join('')
       }
     })
   }
