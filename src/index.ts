@@ -38,13 +38,15 @@ export interface RelayTable {
 
 declare module 'koishi-core' {
   interface Tables {
-    dcqqRelay: RelayTable
+    dcqq_relay: RelayTable
   }
 }
 
-Tables.extend('dcqqRelay')
+const TableName = "dcqq_relay"
+
+Tables.extend(TableName)
 Database.extend('koishi-plugin-mysql', ({ tables }) => {
-  tables.dcqqRelay = {
+  tables.dcqq_relay = {
     id: 'INT(10) UNSIGNED NOT NULL AUTO_INCREMENT',
     dcId: 'VARCHAR(18) NOT NULL',
     onebotId: 'INT(11)',
@@ -64,11 +66,11 @@ export async function apply(ctx: Context, config?: Config) {
     if (meta.platform === "discord") {
       await meta.preprocess()
       const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-      let data = await ctx.database.get('dcqqRelay', { dcId: [meta.messageId], deleted: [false] })
+      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [false] })
       const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
       if (data.length) {
         data[0].deleted = true
-        await ctx.database.update('dcqqRelay', data)
+        await ctx.database.update(TableName, data)
         try {
           await onebot.deleteMessage('', data[0].onebotId)
         } catch (e) {
@@ -76,7 +78,7 @@ export async function apply(ctx: Context, config?: Config) {
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
         data[0].onebotId = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
         data[0].deleted = false
-        await ctx.database.update('dcqqRelay', data)
+        await ctx.database.update(TableName, data)
       } else {
       }
     }
@@ -84,10 +86,10 @@ export async function apply(ctx: Context, config?: Config) {
 
   ctx.on('message-deleted', async (meta) => {
     if (meta.platform === "discord") {
-      let data = await ctx.database.get('dcqqRelay', { dcId: [meta.messageId], deleted: [false] })
+      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [false] })
       if (data.length) {
         data[0].deleted = true
-        await ctx.database.update('dcqqRelay', data)
+        await ctx.database.update(TableName, data)
         const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
         try {
           await onebot.deleteMessage('', data[0].onebotId)
@@ -96,10 +98,10 @@ export async function apply(ctx: Context, config?: Config) {
         }
       }
     } else {
-      let data = await ctx.database.get('dcqqRelay', { onebotId: [meta.messageId.toString()], deleted: [false] })
+      let data = await ctx.database.get(TableName, { onebotId: [meta.messageId.toString()], deleted: [false] })
       if (data.length) {
         data[0].deleted = true
-        await ctx.database.update('dcqqRelay', data)
+        await ctx.database.update(TableName, data)
         const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
         const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
         try {
@@ -131,7 +133,7 @@ export async function apply(ctx: Context, config?: Config) {
       // const dcBot = meta.bot as DiscordBot
       const msg = await adaptMessage(meta)
       let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
-      await ctx.database.create('dcqqRelay', {
+      await ctx.database.create(TableName, {
         onebotId: sendId,
         message: meta.content,
         dcId: meta.messageId
@@ -140,7 +142,7 @@ export async function apply(ctx: Context, config?: Config) {
       const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       const data = await adaptOnebotMessage(meta)
       let sentId = await dcBot.$executeWebhook(relation.webhookId, relation.webhookToken, { ...data, tts: false }, true)
-      await ctx.database.create('dcqqRelay', {
+      await ctx.database.create(TableName, {
         onebotId: meta.messageId,
         message: meta.content,
         dcId: sentId
@@ -212,7 +214,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
 
   let quotePrefix = ""
   if (meta.quote) {
-    let quote = await meta.database.get('dcqqRelay', {
+    let quote = await meta.database.get(TableName, {
       dcId: [meta.quote.messageId]
     })
     if (quote.length) {
@@ -234,7 +236,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
   let quoteId = null
   let _quote: any;
   if (quoteObj) {
-    let quote = await meta.database.get('dcqqRelay', {
+    let quote = await meta.database.get(TableName, {
       onebotId: [quoteObj.data.id]
     })
     if (quote.length) {
