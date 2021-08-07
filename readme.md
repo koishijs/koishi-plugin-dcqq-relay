@@ -9,21 +9,28 @@
 yarn add koishi-plugin-dcqq-relay
 ```
 
-## 配置
-你需要一个mysql数据库
+## 升级注意
+由 `0.1.x` 升级到 `0.2.0` 有数据库表结构修改, 插件不提供旧数据的迁移
 
-配置样例如下
+## 配置
+请首先根据 [使用数据库](https://koishi.js.org/guide/database.html) 对 koishi 进行配置
+
+配置样例如下 (非完整 koishi 用法)
 
 ``` typescript
 import { apply } from 'koishi-plugin-dcqq-relay'
+import * as mysql from 'koishi-plugin-mysql'
+
+// process.env.XXX 的值请根据实际情况修改
+
+app.plugin(mysql.apply, {
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_DATABASE,
+})
 
 app.plugin(apply, {
-  database: {
-    host: process.env.DB_HOST,
-    username: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
-  },
   relations: [{
     discordChannel: process.env.CHANNEL_DISCORD,
     onebotChannel: process.env.CHANNEL_ONEBOT,
