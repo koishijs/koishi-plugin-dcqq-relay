@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-dcqq-relay",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "main": "dist/index.js",
   "description": "Synchronize messages between discord and qq",
   "repository": "https://github.com/koishijs/koishi-plugin-dcqq-relay",
@@ -14,22 +14,19 @@
     "dist"
   ],
   "devDependencies": {
-    "koishi-adapter-discord": "^1.3.3",
-    "koishi-adapter-onebot": "^3.1.0",
-    "koishi-core": "^3.13.0",
-    "koishi-plugin-mongo": "^2.3.0",
-    "koishi-plugin-mysql": "^3.4.0",
-    "typescript": "^4.2.2"
+    "typescript": "^4.4.4"
   },
   "dependencies": {
-    "koishi-core": "^3.13.0",
+    "@koishijs/plugin-adapter-discord": "^2.0.0-beta.0",
+    "@koishijs/plugin-adapter-onebot": "^4.0.0-beta.0",
+    "@koishijs/plugin-database-mysql": "^4.0.0-beta.0",
     "qface": "^1.2.0"
   },
   "peerDependencies": {
-    "koishi-adapter-discord": "^1.1.3",
-    "koishi-adapter-onebot": "^3.0.9",
-    "koishi-core": "^3.13.0",
-    "koishi-plugin-mongo": "^2.3.0",
-    "koishi-plugin-mysql": "^3.4.0"
+    "@koishijs/plugin-adapter-discord": "^2.0.0-beta.0",
+    "@koishijs/plugin-adapter-onebot": "^4.0.0-beta.0",
+    "@koishijs/plugin-database-mongo": "^3.0.0-beta.0",
+    "@koishijs/plugin-database-mysql": "^4.0.0-beta.0",
+    "koishi": "^4.0.0-beta.0"
   }
 }

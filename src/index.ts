@@ -1,12 +1,9 @@
-import 'koishi-adapter-discord'
-import 'koishi-adapter-onebot'
-import { Context, Database, Session, Tables } from 'koishi-core'
-import { CQBot } from 'koishi-adapter-onebot'
-import { DiscordBot } from 'koishi-adapter-discord'
-import { Logger, segment } from 'koishi-utils'
-import { Embed, GuildMember, Message, Role, snowflake } from "koishi-adapter-discord/lib/types";
-import type { } from 'koishi-plugin-mongo'
-import type { } from 'koishi-plugin-mysql'
+import { Context, Database, Session, Tables, Logger, segment } from 'koishi'
+import { OneBotBot } from '@koishijs/plugin-adapter-onebot'
+import { DiscordBot } from '@koishijs/plugin-adapter-discord/lib/bot'
+import { Embed, GuildMember, Message, Role, snowflake } from "@koishijs/plugin-adapter-discord/lib/types";
+import type { } from '@koishijs/plugin-adapter-discord'
+import type { } from '@koishijs/plugin-adapter-onebot'
 // @ts-ignore
 import { data } from 'qface'
 
@@ -32,11 +29,11 @@ export interface RelayTable {
   id: number
   dcId: string;
   onebotId: string;
-  deleted: boolean;
+  deleted: number;
   message: string;
 }
 
-declare module 'koishi-core' {
+declare module 'koishi' {
   interface Tables {
     dcqq_relay: RelayTable
   }
@@ -44,14 +41,14 @@ declare module 'koishi-core' {
 
 const TableName = "dcqq_relay"
 
-Tables.extend(TableName)
-Database.extend('koishi-plugin-mysql', ({ tables }) => {
-  tables.dcqq_relay = {
-    id: 'INT(10) UNSIGNED NOT NULL AUTO_INCREMENT',
-    dcId: 'VARCHAR(18) NOT NULL',
-    onebotId: 'INT(11)',
-    message: "MEDIUMTEXT"
-  }
+Tables.extend(TableName, {
+  id: 'unsigned',
+  dcId: 'string',
+  onebotId: 'string',
+  deleted: 'integer',
+  message: 'text'
+}, {
+  autoInc: true
 })
 
 export async function apply(ctx: Context, config?: Config) {
@@ -65,20 +62,20 @@ export async function apply(ctx: Context, config?: Config) {
     }
     if (meta.platform === "discord") {
       await meta.preprocess()
-      const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
-      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [false] })
+      const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
+      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [0] })
       const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
       if (data.length) {
-        data[0].deleted = true
-        await ctx.database.update(TableName, data)
+        data[0].deleted = 1
+        await ctx.database.upsert(TableName, data)
         try {
           await onebot.deleteMessage('', data[0].onebotId)
         } catch (e) {
         }
         const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
-        data[0].onebotId = await onebot.sendGroupMessage(onebotChannel, msg + "(edited)")
-        data[0].deleted = false
-        await ctx.database.update(TableName, data)
+        data[0].onebotId = await onebot.sendGuildMessage(onebotChannel, msg + "(edited)")
+        data[0].deleted = 0
+        await ctx.database.upsert(TableName, data)
       } else {
       }
     }
@@ -86,11 +83,11 @@ export async function apply(ctx: Context, config?: Config) {
 
   ctx.on('message-deleted', async (meta) => {
     if (meta.platform === "discord") {
-      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [false] })
+      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [0] })
       if (data.length) {
-        data[0].deleted = true
-        await ctx.database.update(TableName, data)
-        const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
+        data[0].deleted = 1
+        await ctx.database.upsert(TableName, data)
+        const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
         try {
           await onebot.deleteMessage('', data[0].onebotId)
         } catch (e) {
@@ -98,12 +95,12 @@ export async function apply(ctx: Context, config?: Config) {
         }
       }
     } else {
-      let data = await ctx.database.get(TableName, { onebotId: [meta.messageId.toString()], deleted: [false] })
+      let data = await ctx.database.get(TableName, { onebotId: [meta.messageId.toString()], deleted: [0] })
       if (data.length) {
-        data[0].deleted = true
-        await ctx.database.update(TableName, data)
+        data[0].deleted = 1
+        await ctx.database.upsert(TableName, data)
         const discordChannel = config.relations.find(v => v.onebotChannel === meta.channelId)
-        const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+        const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
         try {
           await dcBot.deleteMessage(discordChannel.discordChannel, data[0].dcId)
         } catch (e) {
@@ -129,19 +126,21 @@ export async function apply(ctx: Context, config?: Config) {
     const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
     if (meta.platform === 'discord') {
       await meta.preprocess()
-      const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
+      const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
       // const dcBot = meta.bot as DiscordBot
       const msg = await adaptMessage(meta)
-      let sendId = await onebot.sendGroupMessage(relation.onebotChannel, msg)
+      let sendId = await onebot.sendGuildMessage(relation.onebotChannel, msg)
       await ctx.database.create(TableName, {
         onebotId: sendId,
         message: meta.content,
         dcId: meta.messageId
       })
     } else {
-      const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+      const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       const data = await adaptOnebotMessage(meta)
-      let sentId = await dcBot.$executeWebhook(relation.webhookId, relation.webhookToken, { ...data, tts: false }, true)
+      let sentId = await dcBot.request('POST', `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`, {
+        ...data, tts: false
+      })
       await ctx.database.create(TableName, {
         onebotId: meta.messageId,
         message: meta.content,
@@ -157,7 +156,7 @@ export async function apply(ctx: Context, config?: Config) {
 }
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
-  const dcBot = meta.app._bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+  const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
   const msg = await dcBot.request<Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
   let roles: Role[] = undefined
   let members: Record<snowflake, GuildMember> = {}
@@ -180,7 +179,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
 
       const dcBot = meta.bot as DiscordBot
       if (v.data.id) {
-        let member = members[v.data.id] || await dcBot.$getGuildMember(meta.groupId, v.data.id)
+        let member = members[v.data.id] || await dcBot.$getGuildMember(meta.guildId, v.data.id)
         members[v.data.id] = member
         let username
 
@@ -192,7 +191,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         return `@${username} `
       }
       if (v.data.role) {
-        roles = roles || await dcBot.$getGuildRoles(meta.groupId)
+        roles = roles || await dcBot.$getGuildRoles(meta.guildId)
         return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'} `
       }
       return ''
@@ -230,7 +229,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   return `${quotePrefix}${username}:\n${contents}`
 }
 const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
-  const onebot = meta.app._bots.find(v => v.platform === 'onebot') as unknown as CQBot
+  const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
   let parsed = segment.parse(meta.content)
   const quoteObj = parsed.find(v => v.type === 'quote')
   let quoteId = null
@@ -255,7 +254,7 @@ const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
       if (v.data.id === onebot.selfId) {
         return ''
       }
-      let info = await onebot.$getGroupMemberInfo(meta.groupId, v.data.id)
+      let info = await onebot.getGuildMember(meta.guildId, v.data.id)
       return `@[QQ: ${v.data.id}]${info.nickname} `
     }
     if (v.type === 'text') {
