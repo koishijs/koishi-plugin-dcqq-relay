@@ -10,6 +10,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "declaration": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "inlineSourceMap": true
   }
 }

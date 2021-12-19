@@ -1,12 +1,10 @@
-import { Context, Database, Session, Tables, Logger, segment } from 'koishi'
+import { Context, Session, Logger, segment } from 'koishi'
 import { OneBotBot } from '@koishijs/plugin-adapter-onebot'
-import { DiscordBot } from '@koishijs/plugin-adapter-discord/lib/bot'
+import { DiscordBot, Sender } from '@koishijs/plugin-adapter-discord'
 import { Embed, GuildMember, Message, Role, snowflake } from "@koishijs/plugin-adapter-discord/lib/types";
-import type { } from '@koishijs/plugin-adapter-discord'
 import type { } from '@koishijs/plugin-adapter-onebot'
 // @ts-ignore
 import { data } from 'qface'
-
 interface RelayRelation {
   discordChannel: string;
   discordGuild: string;
@@ -41,18 +39,19 @@ declare module 'koishi' {
 
 const TableName = "dcqq_relay"
 
-Tables.extend(TableName, {
-  id: 'unsigned',
-  dcId: 'string',
-  onebotId: 'string',
-  deleted: 'integer',
-  message: 'text'
-}, {
-  autoInc: true
-})
+
 
 export async function apply(ctx: Context, config?: Config) {
   c = config
+  ctx.model.extend(TableName, {
+    id: 'unsigned',
+    dcId: 'string',
+    onebotId: 'string',
+    deleted: 'integer',
+    message: 'text'
+  }, {
+    autoInc: true
+  })
   ctx.on('message-updated', async (meta) => {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
@@ -138,9 +137,9 @@ export async function apply(ctx: Context, config?: Config) {
     } else {
       const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       const data = await adaptOnebotMessage(meta)
-      let sentId = await dcBot.request('POST', `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`, {
-        ...data, tts: false
-      })
+      console.log(dcBot.http)
+      let send = Sender.from(dcBot, `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`)
+      let sentId = await send(data.content, { ...data, tts: false })
       await ctx.database.create(TableName, {
         onebotId: meta.messageId,
         message: meta.content,
@@ -157,7 +156,7 @@ export async function apply(ctx: Context, config?: Config) {
 
 const adaptMessage = async (meta: Session.Payload<"message", any>) => {
   const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
-  const msg = await dcBot.request<Message>('GET', `/channels/${meta.channelId}/messages/${meta.messageId}`)
+  const msg = await dcBot.internal.getChannelMessage(meta.channelId, meta.messageId)
   let roles: Role[] = undefined
   let members: Record<snowflake, GuildMember> = {}
   let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
@@ -168,6 +167,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
     } else if (v.type === "video") {
       return `[视频: ${v.data.file}]`
     } else if (v.type === "sharp") {
+      // @ts-ignore
       let channel = await dcBot.$getChannel(v.data.id)
       return `[频道: ${channel.name}(${v.data.id})]`
     } else if (v.type === 'at') {
@@ -179,7 +179,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
 
       const dcBot = meta.bot as DiscordBot
       if (v.data.id) {
-        let member = members[v.data.id] || await dcBot.$getGuildMember(meta.guildId, v.data.id)
+        let member = members[v.data.id] || await dcBot.internal.getGuildMember(meta.guildId, v.data.id)
         members[v.data.id] = member
         let username
 
@@ -191,7 +191,7 @@ const adaptMessage = async (meta: Session.Payload<"message", any>) => {
         return `@${username} `
       }
       if (v.data.role) {
-        roles = roles || await dcBot.$getGuildRoles(meta.guildId)
+        roles = roles || await dcBot.internal.getGuildRoles(meta.guildId)
         return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'} `
       }
       return ''
