@@ -149,11 +149,31 @@ export async function apply(ctx: Context, config?: Config) {
   ctx.command('relay', '查看同步插件帮助信息')
     .action(() => `仓库地址: https://github.com/koishijs/koishi-plugin-dcqq-relay`)
 
+  ctx.platform('discord')
+    .channel(...config.relations.map(v => v.discordChannel))
+    .command('send-separately <message:text>')
+    .action(async ({ session: meta }, message: string) => {
+      const relation = config.relations.find(v => v.discordChannel === meta.channelId)
+      await meta.preprocess()
+      const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
+      const msg = await adaptMessage(meta, message)
+      await onebot.sendMessage(relation.onebotChannel,
+        meta.author.nickname !== meta.author.username
+          ? `${meta.author.nickname}(${meta.author.username}#${meta.author.discriminator})`
+          : `${meta.author.username}#${meta.author.discriminator}`
+      )
+      let sendId = (await onebot.sendMessage(relation.onebotChannel, msg))[0]
+      await ctx.database.create(TableName, {
+        onebotId: sendId,
+        message: meta.content,
+        dcId: meta.messageId
+      })
+    })
 
   // @ts-ignore
-  const adaptMessage = async (meta: Session.Payload<"message", any>) => {
+  const adaptMessage = async (meta: Session.Payload<"message", any>, message?: string) => {
     const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
-    const msg = await dcBot.internal.getChannelMessage(meta.channelId, meta.messageId)
+    const msg = message ?? await dcBot.internal.getChannelMessage(meta.channelId, meta.messageId)
     let roles: Role[] = undefined
     let members: Record<snowflake, GuildMember> = {}
     let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
@@ -223,6 +243,7 @@ export async function apply(ctx: Context, config?: Config) {
     } else {
       username = `${meta.author.username}#${meta.author.discriminator}`
     }
+    if(message !== undefined) return contents
     return `${quotePrefix}${username}:\n${contents}`
   }
   // @ts-ignore
