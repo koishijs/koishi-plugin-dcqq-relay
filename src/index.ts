@@ -1,7 +1,7 @@
-import { Context, Session, Logger, segment } from 'koishi'
+import { Context, Session, Logger, segment, Schema } from 'koishi'
 import { OneBotBot } from '@koishijs/plugin-adapter-onebot'
 import { DiscordBot, Sender } from '@koishijs/plugin-adapter-discord'
-import { Embed, GuildMember, Message, Role, snowflake } from "@koishijs/plugin-adapter-discord/lib/types";
+import { Embed, GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import type { } from '@koishijs/plugin-adapter-onebot'
 // @ts-ignore
 import { data } from 'qface'
@@ -15,8 +15,6 @@ interface RelayRelation {
 }
 
 export interface Config {
-  onebotSelfId: string;
-  discordToken: string;
   relations: RelayRelation[]
 }
 
@@ -39,9 +37,20 @@ declare module 'koishi' {
 
 const TableName = "dcqq_relay"
 
+export const Config: Schema<Config> = Schema.object({
+  relations: Schema.array(Schema.object({
+    discordChannel: Schema.string().required(),
+    discordGuild: Schema.string().required(),
+    onebotChannel: Schema.string().required(),
+    webhookId: Schema.string().required(),
+    webhookToken: Schema.string().required(),
+    discordLogChannel: Schema.string(),
+  }))
+})
+export const using = ['database'] as const
+new Logger('mysql').level = 3
 
-
-export async function apply(ctx: Context, config?: Config) {
+export async function apply(ctx: Context, config: Config) {
   c = config
   ctx.model.extend(TableName, {
     id: 'unsigned',
@@ -52,32 +61,29 @@ export async function apply(ctx: Context, config?: Config) {
   }, {
     autoInc: true
   })
-  ctx.on('message-updated', async (meta) => {
+  ctx.platform('discord').on('message-updated', async (meta) => {
     if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
       return;
     }
     if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
       return
     }
-    if (meta.platform === "discord") {
-      await meta.preprocess()
-      const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
-      let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [0] })
-      const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
-      if (data.length) {
-        data[0].deleted = 1
-        await ctx.database.upsert(TableName, data)
-        try {
-          await onebot.deleteMessage('', data[0].onebotId)
-        } catch (e) {
-        }
-        // @ts-ignore
-        const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
-        data[0].onebotId = (await onebot.sendMessage(onebotChannel, msg + "(edited)"))[0]
-        data[0].deleted = 0
-        await ctx.database.upsert(TableName, data)
-      } else {
+    await meta.preprocess()
+    const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
+    let data = await ctx.database.get(TableName, { dcId: [meta.messageId], deleted: [0] })
+    const onebotChannel = config.relations.find(v => v.discordChannel === meta.channelId).onebotChannel
+    if (data.length) {
+      data[0].deleted = 1
+      await ctx.database.upsert(TableName, data)
+      try {
+        await onebot.deleteMessage('', data[0].onebotId)
+      } catch (e) {
       }
+      // @ts-ignore
+      const msg = await adaptMessage(meta as unknown as Session.Payload<"message", any>)
+      data[0].onebotId = (await onebot.sendMessage(onebotChannel, msg + "(edited)"))[0]
+      data[0].deleted = 0
+      await ctx.database.upsert(TableName, data)
     }
   })
 
