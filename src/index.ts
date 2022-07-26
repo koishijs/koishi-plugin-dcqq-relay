@@ -46,7 +46,6 @@ export const Config: Schema<Config> = Schema.object({
   }))
 })
 export const using = ['database'] as const
-new Logger('mysql').level = 3
 
 export async function apply(ctx: Context, config: Config) {
   ctx.model.extend(TableName, {
@@ -177,6 +176,9 @@ export async function apply(ctx: Context, config: Config) {
         })
         return rtn
       }) + contents
+      if(msg.sticker_items){
+        contents += msg.sticker_items.map(v => segment('image', {url: `https://cdn.discordapp.com/stickers/${v.id}.png`})).join('')
+      }
 
       let quotePrefix = ""
       if (meta.quote) {
@@ -196,7 +198,7 @@ export async function apply(ctx: Context, config: Config) {
       return `${quotePrefix}${username}:\n${contents}`
     }
 
-    const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
+    const relation = config.relations.find(v => v.discordChannel === meta.channelId)
     await meta.preprocess()
     const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
     const msg = await adaptMessage()
@@ -209,7 +211,7 @@ export async function apply(ctx: Context, config: Config) {
   })
 
   validCtx.platform('onebot').on('message', async (meta) => {
-    const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
+    const relation = config.relations.find(v => v.onebotChannel === meta.channelId)
     const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
 
     const adaptOnebotMessage = async () => {
