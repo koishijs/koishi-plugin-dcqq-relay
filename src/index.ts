@@ -125,7 +125,6 @@ export async function apply(ctx: Context, config: Config) {
       let roles: Role[] = undefined
       let members: Record<snowflake, GuildMember> = {}
       let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
-        console.log(v)
         if (v.type === "face") {
           return segment('image', { url: `https://cdn.discordapp.com/emojis/${v.data.id}` })
         } else if (v.type === "file") {
