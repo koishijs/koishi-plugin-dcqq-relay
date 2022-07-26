@@ -3,8 +3,7 @@ import { OneBotBot } from '@koishijs/plugin-adapter-onebot'
 import { DiscordBot, Sender } from '@koishijs/plugin-adapter-discord'
 import { Embed, GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import type { } from '@koishijs/plugin-adapter-onebot'
-// @ts-ignore
-import { data } from 'qface'
+import { get } from 'qface'
 interface RelayRelation {
   discordChannel: string;
   discordGuild: string;
@@ -18,7 +17,6 @@ export interface Config {
   relations: RelayRelation[]
 }
 
-let c: Config;
 const logger = new Logger('relay')
 
 export interface RelayTable {
@@ -51,7 +49,6 @@ export const using = ['database'] as const
 new Logger('mysql').level = 3
 
 export async function apply(ctx: Context, config: Config) {
-  c = config
   ctx.model.extend(TableName, {
     id: 'unsigned',
     dcId: 'string',
@@ -118,179 +115,182 @@ export async function apply(ctx: Context, config: Config) {
     }
   })
 
-  ctx.on('message', async (meta) => {
-    if (!config.relations.map(v => v.discordChannel).concat(config.relations.map(v => v.onebotChannel)).includes(meta.channelId)) {
-      return
-    }
-    if (config.relations.map(v => v.webhookId).includes(meta.userId)) {
-      return;
-    }
-    if (meta.content.startsWith("//")) {
-      return;
-    }
-    const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
-    if (meta.platform === 'discord') {
-      await meta.preprocess()
-      const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
-      const msg = await adaptMessage(meta)
-      let sendId = (await onebot.sendMessage(relation.onebotChannel, msg))[0]
-      await ctx.database.create(TableName, {
-        onebotId: sendId,
-        message: meta.content,
-        dcId: meta.messageId
-      })
-    } else {
+  const validCtx = ctx.intersect(session => [...config.relations.map(v => v.discordChannel), ...config.relations.map(v => v.onebotChannel)].includes(session.channelId))
+    .exclude(session => config.relations.map(v => v.webhookId).includes(session.userId))
+    .exclude(session => session.content.startsWith("//"))
+
+  validCtx.platform('discord').on('message', async (meta) => {
+    const adaptMessage = async () => {
       const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
-      const data = await adaptOnebotMessage(meta)
-      let send = Sender.from(dcBot, `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`)
-      let sentId = (await send(data.content, { ...data, tts: false }))[0]
-      await ctx.database.create(TableName, {
-        onebotId: meta.messageId,
-        message: meta.content,
-        dcId: sentId
-      })
+      const msg = await dcBot.internal.getChannelMessage(meta.channelId, meta.messageId)
+      let roles: Role[] = undefined
+      let members: Record<snowflake, GuildMember> = {}
+      let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
+        console.log(v)
+        if (v.type === "face") {
+          return segment('image', { url: `https://cdn.discordapp.com/emojis/${v.data.id}` })
+        } else if (v.type === "file") {
+          return `[文件: ${v.data.file}]`
+        } else if (v.type === "video") {
+          return `[视频: ${v.data.file}]`
+        } else if (v.type === "sharp") {
+          // @ts-ignore
+          let channel = await dcBot.$getChannel(v.data.id)
+          return `[频道: ${channel.name}(${v.data.id})]`
+        } else if (v.type === 'at') {
+          if (v.data.type === "here") {
+            return `@${v.data.type}`
+          } else if (v.data.type === 'all') {
+            return segment.join([v]).trim()
+          }
+
+          const dcBot = meta.bot
+          if (v.data.id) {
+            let member = members[v.data.id] || await dcBot.internal.getGuildMember(meta.guildId, v.data.id)
+            members[v.data.id] = member
+            let username
+
+            if (member.nick && member.nick !== member.user.username) {
+              username = `${member.nick}(${member.user.username}#${member.user.discriminator})`
+            } else {
+              username = `${member.user.username}#${member.user.discriminator}`
+            }
+            return `@${username} `
+          }
+          if (v.data.role) {
+            roles = roles || await dcBot.internal.getGuildRoles(meta.guildId)
+            return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'} `
+          }
+          return ''
+        } else if (v.type === "share") {
+          return v.data?.title + ' ' + v.data.url
+        } else if (v.type === 'quote') {
+          return ''
+        }
+        return segment.join([v]).trim()
+      }))).join('')
+      contents = msg.embeds.map(embed => {
+        let rtn = ''
+        rtn += embed.description || ''
+        embed.fields?.forEach(field => {
+          rtn += `${field.name}: ${field.value}\n`
+        })
+        return rtn
+      }) + contents
+
+      let quotePrefix = ""
+      if (meta.quote) {
+        let quote = await ctx.database.get(TableName, {
+          dcId: [meta.quote.messageId]
+        })
+        if (quote.length) {
+          quotePrefix = segment('reply', { id: quote[0].onebotId })
+        }
+      }
+      let username
+      if (meta.author.nickname !== meta.author.username) {
+        username = `${meta.author.nickname}(${meta.author.username}#${meta.author.discriminator})`
+      } else {
+        username = `${meta.author.username}#${meta.author.discriminator}`
+      }
+      return `${quotePrefix}${username}:\n${contents}`
     }
+
+    const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
+    await meta.preprocess()
+    const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
+    const msg = await adaptMessage()
+    let sendId = (await onebot.sendMessage(relation.onebotChannel, msg))[0]
+    await ctx.database.create(TableName, {
+      onebotId: sendId,
+      message: meta.content,
+      dcId: meta.messageId
+    })
+  })
+
+  validCtx.platform('onebot').on('message', async (meta) => {
+    const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
+    const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+
+    const adaptOnebotMessage = async () => {
+      const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
+      let parsed = segment.parse(meta.content)
+      const quoteObj = parsed.find(v => v.type === 'quote')
+      let quoteId = null
+      let _quote: any;
+      if (quoteObj) {
+        let quote = await ctx.database.get(TableName, {
+          onebotId: [quoteObj.data.id]
+        })
+        if (quote.length) {
+          quoteId = quote[0].dcId
+          _quote = quote[0]
+        } else {
+          logger.info('quote not found %s', quoteObj.data.id)
+        }
+      }
+      let embeds: Embed[] = []
+      let contents = (await Promise.all(parsed.map(async v => {
+        if (v.type === "quote") {
+          return ''
+        }
+        if (v.type === 'at') {
+          if (v.data.id === onebot.selfId) {
+            return ''
+          }
+          let info = await onebot.getGuildMember(meta.guildId, v.data.id)
+          return `@[QQ: ${v.data.id}]${info.nickname} `
+        }
+        if (v.type === 'text') {
+          return segment.unescape(v.data.content).trim()
+        }
+        if (v.type === 'image' && v.data.type === 'flash') {
+          return ''
+        }
+        if (v.type === 'reply') {
+          return ''
+        }
+        if (v.type === "image") {
+          let r = await ctx.http.head(v.data.url)
+          let pos = v.data.file.lastIndexOf(".")
+          v.data.file = v.data.file.substring(0, pos < 0 ? v.data.file.length : pos) + "."
+            + r['content-type'].split('/')[1]
+        }
+        if (v.type === 'face') {
+          let alt = get(v.data.id)
+          return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${v.data.id}]`
+        }
+        return segment.join([v]).trim()
+      }))).join('')
+      contents = contents.replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
+      const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
+      if (quoteId) {
+        embeds.push({
+          description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
+          footer: {
+            text: segment.parse(_quote?.message || '').filter(v => v.type === "text").map(v => segment.join([v])).join('')
+          }
+        })
+      }
+      return {
+        content: contents,
+        embeds,
+        username: `[QQ:${meta.userId}] ${meta.username}`,
+        avatar_url: `https://q1.qlogo.cn/g?b=qq&nk=${meta.userId}&s=640`
+      }
+    }
+
+    const data = await adaptOnebotMessage()
+    let send = Sender.from(dcBot, `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`)
+    let sentId = (await send(data.content, { ...data, tts: false }))[0]
+    await ctx.database.create(TableName, {
+      onebotId: meta.messageId,
+      message: meta.content,
+      dcId: sentId
+    })
   })
 
   ctx.command('relay', '查看同步插件帮助信息')
     .action(() => `仓库地址: https://github.com/koishijs/koishi-plugin-dcqq-relay`)
 
-
-  // @ts-ignore
-  const adaptMessage = async (meta: Session.Payload<"message", any>) => {
-    const dcBot = meta.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
-    const msg = await dcBot.internal.getChannelMessage(meta.channelId, meta.messageId)
-    let roles: Role[] = undefined
-    let members: Record<snowflake, GuildMember> = {}
-    let contents = (await Promise.all(segment.parse(meta.content).map(async v => {
-      if (v.type === "face") {
-        return segment('image', { file: `https://cdn.discordapp.com/emojis/${v.data.id}` })
-      } else if (v.type === "file") {
-        return `[文件: ${v.data.file}]`
-      } else if (v.type === "video") {
-        return `[视频: ${v.data.file}]`
-      } else if (v.type === "sharp") {
-        // @ts-ignore
-        let channel = await dcBot.$getChannel(v.data.id)
-        return `[频道: ${channel.name}(${v.data.id})]`
-      } else if (v.type === 'at') {
-        if (v.data.type === "here") {
-          return `@${v.data.type}`
-        } else if (v.data.type === 'all') {
-          return segment.join([v]).trim()
-        }
-
-        const dcBot = meta.bot as DiscordBot
-        if (v.data.id) {
-          let member = members[v.data.id] || await dcBot.internal.getGuildMember(meta.guildId, v.data.id)
-          members[v.data.id] = member
-          let username
-
-          if (member.nick && member.nick !== member.user.username) {
-            username = `${member.nick}(${member.user.username}#${member.user.discriminator})`
-          } else {
-            username = `${member.user.username}#${member.user.discriminator}`
-          }
-          return `@${username} `
-        }
-        if (v.data.role) {
-          roles = roles || await dcBot.internal.getGuildRoles(meta.guildId)
-          return `@[身分組]${roles.find(r => r.id === v.data.role)?.name || '未知'} `
-        }
-        return ''
-      } else if (v.type === "share") {
-        return v.data?.title + ' ' + v.data.url
-      } else if (v.type === 'quote') {
-        return ''
-      }
-      return segment.join([v]).trim()
-    }))).join('')
-    contents = msg.embeds.map(embed => {
-      let rtn = ''
-      rtn += embed.description || ''
-      embed.fields?.forEach(field => {
-        rtn += `${field.name}: ${field.value}\n`
-      })
-      return rtn
-    }) + contents
-
-    let quotePrefix = ""
-    if (meta.quote) {
-      let quote = await ctx.database.get(TableName, {
-        dcId: [meta.quote.messageId]
-      })
-      if (quote.length) {
-        quotePrefix = segment('reply', { id: quote[0].onebotId })
-      }
-    }
-    let username
-    if (meta.author.nickname !== meta.author.username) {
-      username = `${meta.author.nickname}(${meta.author.username}#${meta.author.discriminator})`
-    } else {
-      username = `${meta.author.username}#${meta.author.discriminator}`
-    }
-    return `${quotePrefix}${username}:\n${contents}`
-  }
-  // @ts-ignore
-  const adaptOnebotMessage = async (meta: Session.Payload<"message", any>) => {
-    const onebot = meta.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
-    let parsed = segment.parse(meta.content)
-    const quoteObj = parsed.find(v => v.type === 'quote')
-    let quoteId = null
-    let _quote: any;
-    if (quoteObj) {
-      let quote = await ctx.database.get(TableName, {
-        onebotId: [quoteObj.data.id]
-      })
-      if (quote.length) {
-        quoteId = quote[0].dcId
-        _quote = quote[0]
-      } else {
-        logger.info('quote not found %s', quoteObj.data.id)
-      }
-    }
-    let embeds: Embed[] = []
-    let contents = (await Promise.all(parsed.map(async v => {
-      if (v.type === "quote") {
-        return ''
-      }
-      if (v.type === 'at') {
-        if (v.data.id === onebot.selfId) {
-          return ''
-        }
-        let info = await onebot.getGuildMember(meta.guildId, v.data.id)
-        return `@[QQ: ${v.data.id}]${info.nickname} `
-      }
-      if (v.type === 'text') {
-        return segment.unescape(v.data.content).trim()
-      }
-      if (v.type === 'image' && v.data.type === 'flash') {
-        return ''
-      }
-      if (v.type === 'reply') {
-        return ''
-      }
-      if (v.type === 'face') {
-        let alt = data.find(face => face.QSid === v.data.id)
-        return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${v.data.id}]`
-      }
-      return segment.join([v]).trim()
-    }))).join('')
-    contents = contents.replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
-    const relation = c.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
-    if (quoteId) {
-      embeds.push({
-        description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
-        footer: {
-          text: segment.parse(_quote?.message || '').filter(v => v.type === "text").map(v => segment.join([v])).join('')
-        }
-      })
-    }
-    return {
-      content: contents,
-      embeds,
-      username: `[QQ:${meta.userId}] ${meta.username}`,
-      avatar_url: `https://q1.qlogo.cn/g?b=qq&nk=${meta.userId}&s=640`
-    }
-  }
 }
