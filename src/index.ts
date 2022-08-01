@@ -237,7 +237,7 @@ export async function apply(ctx: Context, config: Config) {
           return `@[QQ: ${v.data.id}]${info.nickname} `
         }
         if (v.type === 'text') {
-          return segment.unescape(v.data.content).trim()
+          return segment.unescape(v.data.content.replace(/\*|_|~|`|^\>/, (v) => `\\${v}`)).trim()
         }
         if (v.type === 'image' && v.data.type === 'flash') {
           return ''
@@ -255,7 +255,6 @@ export async function apply(ctx: Context, config: Config) {
         return segment.join([v]).trim()
       }))).join('')
       contents = contents.replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
-      contents = contents.replace(/\*|_|~|`|^\>/, (v) => `\\${v}`)
       const relation = config.relations.find(v => v.onebotChannel === meta.channelId || v.discordChannel === meta.channelId)
       if (quoteId) {
         embeds.push({
