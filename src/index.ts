@@ -274,7 +274,7 @@ export async function apply(ctx: Context, config: Config) {
 
     const data = await adaptOnebotMessage()
     let send = Sender.from(dcBot, `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`)
-    let sent = (await send(data.content, { ...data, tts: false }))[0]
+    let sent = await send(data.content, { ...data, tts: false })
     for (const sentId of sent) {
       await ctx.database.create(TableName, {
         onebotId: meta.messageId,
