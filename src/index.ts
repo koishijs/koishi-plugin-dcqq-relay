@@ -41,17 +41,13 @@ export const Config: Schema<Config> = Schema.object({
   relations: Schema.array(
     Schema.intersect([
       Schema.object({
-        webhookUrl: Schema.string().required(),
-        onebotChannel: Schema.string().required()
-      }),
-      // Schema.object({
-      //   webhookUrl: Schema.string(),
-      //   discordChannel: Schema.string().required(),
-      //   discordGuild: Schema.string().required(),
-      //   webhookId: Schema.string().required(),
-      //   webhookToken: Schema.string().required(),
-      //   onebotChannel: Schema.string().required()
-      // }),
+        webhookUrl: Schema.string(),
+        onebotChannel: Schema.string().required(),
+        discordChannel: Schema.string(),
+        discordGuild: Schema.string(),
+        webhookId: Schema.string(),
+        webhookToken: Schema.string(),
+      })
     ])
   )
 })
@@ -69,8 +65,8 @@ export async function apply(ctx: Context, config: Config) {
     autoInc: true
   })
 
-  for(const webhook of config.relations){
-    if(webhook.webhookUrl) {
+  for await (const webhook of config.relations) {
+    if (webhook.webhookUrl) {
       let data = await ctx.http.get<Discord.Webhook>(webhook.webhookUrl)
       webhook.webhookId = data.id
       webhook.webhookToken = data.token
@@ -81,7 +77,7 @@ export async function apply(ctx: Context, config: Config) {
 
   const validCtx = ctx.intersect(session => [...config.relations.map(v => v.discordChannel), ...config.relations.map(v => v.onebotChannel)].includes(session.channelId))
     .exclude(session => config.relations.map(v => v.webhookId).includes(session.userId))
-    // .exclude(session => session.content?.startsWith("//"))
+  // .exclude(session => session.content?.startsWith("//"))
 
   validCtx.platform('discord').on('message-deleted', async (session) => {
     let data = await ctx.database.get("dcqq_relay", { dcId: [session.messageId], deleted: [0] })
@@ -135,7 +131,7 @@ export async function apply(ctx: Context, config: Config) {
         if (v.attrs.type === "here") {
           return `@${v.attrs.type}`
         } else if (v.attrs.type === 'all') {
-          return v.toString().trim()
+          return '@everyone'
         }
 
         const dcBot = session.bot
@@ -299,6 +295,7 @@ export async function apply(ctx: Context, config: Config) {
           ...addition,
           content: buffer.trim(),
         })
+        buffer = ""
       } else if (type === "face") {
         let alt = get(attrs.id)
         buffer += alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`
