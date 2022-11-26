@@ -1,6 +1,6 @@
 import { Context, Session, Logger, segment, Schema, Element, Dict } from 'koishi'
 import { OneBotBot } from '@koishijs/plugin-adapter-onebot'
-import { Discord, DiscordBot, DiscordMessenger } from '@koishijs/plugin-adapter-discord'
+import { Discord, DiscordBot } from '@koishijs/plugin-adapter-discord'
 import { Embed, GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import FormData from 'form-data'
 import type { } from '@koishijs/plugin-adapter-onebot'
@@ -39,16 +39,14 @@ declare module 'koishi' {
 
 export const Config: Schema<Config> = Schema.object({
   relations: Schema.array(
-    Schema.intersect([
-      Schema.object({
-        webhookUrl: Schema.string(),
-        onebotChannel: Schema.string().required(),
-        discordChannel: Schema.string(),
-        discordGuild: Schema.string(),
-        webhookId: Schema.string(),
-        webhookToken: Schema.string(),
-      })
-    ])
+    Schema.object({
+      webhookUrl: Schema.string(),
+      onebotChannel: Schema.string().required(),
+      discordChannel: Schema.string(),
+      discordGuild: Schema.string(),
+      webhookId: Schema.string(),
+      webhookToken: Schema.string(),
+    })
   )
 })
 
@@ -116,7 +114,15 @@ export async function apply(ctx: Context, config: Config) {
     let roles: Role[] = undefined
     let members: Record<snowflake, GuildMember> = {}
 
-    let quotePrefix = '';
+    let quotePrefix: Element;
+    if (session.quote) {
+      let quote = await ctx.database.get("dcqq_relay", {
+        dcId: [session.quote.messageId]
+      })
+      if (quote.length) {
+        quotePrefix = Element.quote(quote[0].onebotId)
+      }
+    }
     let contents = (await Promise.all(segment.parse(session.content).map(async v => {
       if (v.type === "face") {
         return segment('image', { url: `https://cdn.discordapp.com/emojis/${v.attrs.id}` })
@@ -154,14 +160,6 @@ export async function apply(ctx: Context, config: Config) {
         return ''
       } else if (v.type === "share") {
         return v.attrs?.title + ' ' + v.attrs.url
-      } else if (v.type === 'quote') {
-        let quote = await ctx.database.get("dcqq_relay", {
-          dcId: [v.attrs.id]
-        })
-        if (quote.length) {
-          quotePrefix = segment('reply', { id: quote[0].onebotId }).toString()
-        }
-        return ''
       }
       return v.toString().trim()
     }))).join('')
@@ -182,7 +180,7 @@ export async function apply(ctx: Context, config: Config) {
     } else {
       username = `${session.author.username}#${session.author.discriminator}`
     }
-    return `${quotePrefix}${username}:\n${contents}`
+    return [quotePrefix, `${username}:\n${contents}`]
   }
 
   validCtx.platform('discord').on('message-updated', async (session) => {
@@ -260,7 +258,7 @@ export async function apply(ctx: Context, config: Config) {
 
     async function sendEmbed(fileBuffer: ArrayBuffer, payload_json: Dict, filename: string) {
       const fd = new FormData()
-      if (filename.endsWith(".image")) filename = "";
+      if (filename.endsWith(".image") || filename.endsWith(".video")) filename = "";
       filename ||= 'file.' + (await fromBuffer(fileBuffer)).ext
       fd.append('file', Buffer.from(fileBuffer), filename)
       fd.append('payload_json', JSON.stringify(payload_json))
@@ -304,7 +302,6 @@ export async function apply(ctx: Context, config: Config) {
     if (buffer) {
       sent.push((await ctx.http.post(url, { ...addition, content: buffer })).id)
     }
-    console.log(sent)
     for (const sentId of sent) {
       await ctx.database.create("dcqq_relay", {
         onebotId: session.messageId,
