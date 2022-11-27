@@ -114,36 +114,46 @@ export async function apply(ctx: Context, config: Config) {
     let roles: Role[] = undefined
     let members: Record<snowflake, GuildMember> = {}
 
-    let quotePrefix: Element;
+    let result: segment.Fragment = []
     if (session.quote) {
       let quote = await ctx.database.get("dcqq_relay", {
         dcId: [session.quote.messageId]
       })
       if (quote.length) {
-        quotePrefix = Element.quote(quote[0].onebotId)
+        result.push(Element.quote(quote[0].onebotId))
       }
     }
-    let contents = (await Promise.all(segment.parse(session.content).map(async v => {
-      if (v.type === "face") {
-        return segment('image', { url: `https://cdn.discordapp.com/emojis/${v.attrs.id}` })
-      } else if (v.type === "file") {
-        return `[文件: ${v.attrs.file}]`
-      } else if (v.type === "video") {
-        return `[视频: ${v.attrs.file}]`
-      } else if (v.type === "sharp") {
-        let channel = await dcBot.internal.getChannel(v.attrs.id)
-        return `[频道: ${channel.name}(${v.attrs.id})]`
-      } else if (v.type === 'at') {
-        if (v.attrs.type === "here") {
-          return `@${v.attrs.type}`
-        } else if (v.attrs.type === 'all') {
-          return '@everyone'
+
+    let username
+    if (session.author.nickname !== session.author.username) {
+      username = `${session.author.nickname}(${session.author.username}#${session.author.discriminator})`
+    } else {
+      username = `${session.author.username}#${session.author.discriminator}`
+    }
+
+    result.push(`${username}: \n`)
+    for (const element of segment.parse(session.content)) {
+      const { type, attrs, children } = element
+      if (type === "face") {
+        result.push(segment.image(`https://cdn.discordapp.com/emojis/${attrs.id}`))
+      } else if (type === "file") {
+        result.push(`[文件: ${attrs.file}](${attrs.url})`)
+      } else if (type === "video") {
+        result.push(`[视频: ${attrs.file}](${attrs.url})`)
+      } else if (type === "sharp") {
+        let channel = await dcBot.internal.getChannel(attrs.id)
+        result.push(`[频道: ${channel.name}(${attrs.id})]`)
+      } else if (type === "at") {
+        if (attrs.type === "here") {
+          result.push(`@${attrs.type}`)
+        } else if (attrs.type === 'all') {
+          result.push('@everyone')
         }
 
         const dcBot = session.bot
-        if (v.attrs.id) {
-          let member = members[v.attrs.id] || await dcBot.internal.getGuildMember(session.guildId, v.attrs.id)
-          members[v.attrs.id] = member
+        if (attrs.id) {
+          let member = members[attrs.id] || await dcBot.internal.getGuildMember(session.guildId, attrs.id)
+          members[attrs.id] = member
           let username
 
           if (member.nick && member.nick !== member.user.username) {
@@ -151,36 +161,29 @@ export async function apply(ctx: Context, config: Config) {
           } else {
             username = `${member.user.username}#${member.user.discriminator}`
           }
-          return `@${username} `
+          result.push(`@${username} `)
         }
-        if (v.attrs.role) {
+        if (attrs.role) {
           roles = roles || await dcBot.internal.getGuildRoles(session.guildId)
-          return `@[身分組]${roles.find(r => r.id === v.attrs.role)?.name || '未知'} `
+          result.push(`@[身分組]${roles.find(r => r.id === attrs.role)?.name || '未知'} `)
         }
-        return ''
-      } else if (v.type === "share") {
-        return v.attrs?.title + ' ' + v.attrs.url
+      } else {
+        result.push(element)
       }
-      return v.toString().trim()
-    }))).join('')
-    contents = msg.embeds.map(embed => {
+    }
+
+    result = [msg.embeds.map(embed => {
       let rtn = ''
       rtn += embed.description || ''
       embed.fields?.forEach(field => {
         rtn += `${field.name}: ${field.value}\n`
       })
       return rtn
-    }) + contents
+    }).join('\n'), ...result]
     if (msg.sticker_items) {
-      contents += msg.sticker_items.map(v => segment('image', { url: `https://cdn.discordapp.com/stickers/${v.id}.png` })).join('')
+      result = [...msg.sticker_items.map(v => segment('image', { url: `https://cdn.discordapp.com/stickers/${v.id}.png` })), ...result]
     }
-    let username
-    if (session.author.nickname !== session.author.username) {
-      username = `${session.author.nickname}(${session.author.username}#${session.author.discriminator})`
-    } else {
-      username = `${session.author.username}#${session.author.discriminator}`
-    }
-    return [quotePrefix, `${username}:\n${contents}`]
+    return result
   }
 
   validCtx.platform('discord').on('message-updated', async (session) => {
@@ -281,7 +284,7 @@ export async function apply(ctx: Context, config: Config) {
       }
       else if (type === 'at') {
         if (attrs.id === onebot.selfId) {
-          return ''
+          continue;
         }
 
         let info = await onebot.getGuildMember(session.guildId, attrs.id)
