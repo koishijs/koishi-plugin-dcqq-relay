@@ -172,16 +172,17 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
 
-    result = [msg.embeds.map(embed => {
+    result = [...result, msg.embeds.map(embed => {
       let rtn = ''
-      rtn += embed.description || ''
+      rtn += embed.title ? `${embed.title}\n` : ''
+      rtn += embed.description ? `${embed.description}\n` : ''
       embed.fields?.forEach(field => {
         rtn += `${field.name}: ${field.value}\n`
       })
       return rtn
-    }).join('\n'), ...result]
+    }).join('\n')]
     if (msg.sticker_items) {
-      result = [...msg.sticker_items.map(v => segment('image', { url: `https://cdn.discordapp.com/stickers/${v.id}.png` })), ...result]
+      result = [...result, ...msg.sticker_items.map(v => segment('image', { url: `https://cdn.discordapp.com/stickers/${v.id}.png` }))]
     }
     return result
   }
@@ -199,7 +200,7 @@ export async function apply(ctx: Context, config: Config) {
       } catch (e) {
       }
       const msg = await adaptDiscordMessage(session)
-      data[0].onebotId = (await onebot.sendMessage(onebotChannel, msg + "(edited)"))[0]
+      data[0].onebotId = (await onebot.sendMessage(onebotChannel, [...msg, '(edited)']))[0]
       data[0].deleted = 0
       await ctx.database.upsert("dcqq_relay", data)
     }
@@ -229,7 +230,7 @@ export async function apply(ctx: Context, config: Config) {
     const onebot = ctx.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
     let parsed = segment.parse(session.content)
     let quoteId = null
-    let _quote: any;
+    let _quote: RelayTable;
     if (session.quote) {
       let quote = await ctx.database.get("dcqq_relay", {
         onebotId: [session.quote.messageId]
@@ -244,10 +245,24 @@ export async function apply(ctx: Context, config: Config) {
     let embeds: Embed[] = []
 
     if (quoteId) {
+      let quotedUsername;
+      let quotedAvatar;
+
+      const quotedMsg = await onebot.getMessage(session.channelId, _quote.onebotId)
+      if (quotedMsg.author.userId === onebot.selfId) {
+        // sent from relay bot
+        const sourceMsg = await dcBot.getMessage(relation.discordChannel, _quote.dcId)
+        quotedUsername = sourceMsg.author.nickname || sourceMsg.author.username
+        quotedAvatar = sourceMsg.author.avatar
+      } else {
+        quotedUsername = session.quote.author.nickname || session.quote.author.username
+        quotedAvatar = session.quote.author.avatar
+      }
       embeds.push({
-        description: `回复 | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
+        description: `${quotedUsername} <t:${Math.ceil(session.quote.timestamp / 1000)}:R> | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
         footer: {
-          text: segment.parse(_quote?.message || '').filter(v => v.type === "text").map(v => v.toString()).join('')
+          text: segment.select(segment.parse(_quote.message), 'text').toString().slice(0, 30),
+          icon_url: quotedAvatar
         }
       })
     }
@@ -255,7 +270,7 @@ export async function apply(ctx: Context, config: Config) {
 
     const addition = {
       username: `[QQ:${session.userId}] ${session.username}`,
-      avatar_url: `https://q1.qlogo.cn/g?b=qq&nk=${session.userId}&s=640`,
+      avatar_url: session.author.avatar,
       embeds
     }
 
