@@ -258,6 +258,7 @@ export async function apply(ctx: Context, config: Config) {
         quotedUsername = session.quote.author.nickname || session.quote.author.username
         quotedAvatar = session.quote.author.avatar
       }
+      quotedUsername = quotedUsername.replace(/[\\*_`~|()]/g, '\\$&')
       embeds.push({
         description: `${quotedUsername} <t:${Math.ceil(session.quote.timestamp / 1000)}:R> | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
         footer: {
@@ -303,7 +304,7 @@ export async function apply(ctx: Context, config: Config) {
         }
 
         let info = await onebot.getGuildMember(session.guildId, attrs.id)
-        buffer += `@[QQ: ${attrs.id}]${info.username ?? info.nickname} `
+        buffer += `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `
       } else if (type === "image" && attrs.type === "flash") {
         // do nothing
       } else if (type === "image" || type === "video") {
