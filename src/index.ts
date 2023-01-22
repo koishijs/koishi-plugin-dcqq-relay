@@ -1,5 +1,5 @@
 import { Context, Session, Logger, segment, Schema, Element, Dict } from 'koishi'
-import { OneBotBot } from '@koishijs/plugin-adapter-onebot'
+import { OneBotBot, OneBot } from '@koishijs/plugin-adapter-onebot'
 import { Discord, DiscordBot } from '@koishijs/plugin-adapter-discord'
 import { Embed, GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import FormData from 'form-data'
@@ -29,6 +29,7 @@ export interface RelayTable {
   onebotId: string;
   deleted: number;
   message: string;
+  isDiscordForward: boolean;
 }
 
 declare module 'koishi' {
@@ -40,12 +41,12 @@ declare module 'koishi' {
 export const Config: Schema<Config> = Schema.object({
   relations: Schema.array(
     Schema.object({
-      webhookUrl: Schema.string(),
-      onebotChannel: Schema.string().required(),
-      discordChannel: Schema.string(),
-      discordGuild: Schema.string(),
-      webhookId: Schema.string(),
-      webhookToken: Schema.string(),
+      webhookUrl: Schema.string().description('编辑频道 - 整合 - 新 Webhook - 复制 URL').role('link'),
+      onebotChannel: Schema.string().required().description('转发至的 QQ 群号'),
+      discordChannel: Schema.string().hidden(),
+      discordGuild: Schema.string().hidden(),
+      webhookId: Schema.string().hidden(),
+      webhookToken: Schema.string().hidden(),
     })
   )
 })
@@ -58,7 +59,8 @@ export async function apply(ctx: Context, config: Config) {
     dcId: 'string',
     onebotId: 'string',
     deleted: 'integer',
-    message: 'text'
+    message: 'text',
+    isDiscordForward: { type: 'boolean', initial: false }
   }, {
     autoInc: true
   })
@@ -78,29 +80,35 @@ export async function apply(ctx: Context, config: Config) {
   // .exclude(session => session.content?.startsWith("//"))
 
   validCtx.platform('discord').on('message-deleted', async (session) => {
-    let data = await ctx.database.get("dcqq_relay", { dcId: [session.messageId], deleted: [0] })
-    if (data.length) {
-      data[0].deleted = 1
-      await ctx.database.upsert("dcqq_relay", data)
+    let [data] = await ctx.database.get("dcqq_relay", { dcId: [session.messageId], deleted: [0] })
+    if (data) {
+      data.deleted = 1
+      await ctx.database.upsert("dcqq_relay", [data])
       const onebot = session.app.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
       try {
-        await onebot.deleteMessage('', data[0].onebotId)
+        await onebot.deleteMessage('', data.onebotId)
       } catch (e) {
 
       }
     }
   })
   validCtx.platform('onebot').on('message-deleted', async (session) => {
-    let data = await ctx.database.get("dcqq_relay", { onebotId: [session.messageId.toString()], deleted: [0] })
-    if (data.length) {
-      data[0].deleted = 1
-      await ctx.database.upsert("dcqq_relay", data)
+    let [data] = await ctx.database.get("dcqq_relay", { onebotId: [session.messageId.toString()], deleted: [0] })
+    if (data) {
+      data.deleted = 1
+      await ctx.database.upsert("dcqq_relay", [data])
       const discordChannel = config.relations.find(v => v.onebotChannel === session.channelId)
       const dcBot = session.app.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
       try {
-        await dcBot.deleteMessage(discordChannel.discordChannel, data[0].dcId)
+        if (data.isDiscordForward) {
+          const msg = await dcBot.internal.getChannelMessage(discordChannel.discordChannel, data.dcId)
+          await dcBot.internal.deleteChannel(msg.thread.id)
+        }
+        await dcBot.deleteMessage(discordChannel.discordChannel, data.dcId)
       } catch (e) {
-
+        if (e.response?.data) {
+          await session.send('删除 DC 消息失败: ' + e.response.data.message)
+        }
       }
       // if (discordChannel.discordLogChannel) {
       //   await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${session.userId}]撤回消息:\n${data[0].message}`)
@@ -220,112 +228,161 @@ export async function apply(ctx: Context, config: Config) {
     }
   })
 
-  validCtx.platform('onebot').on('message', async (session) => {
-    const relation = config.relations.find(v => v.onebotChannel === session.channelId)
+  validCtx.platform('onebot').on('message', async (obSes) => {
+    async function convertMessageToDiscord(webhookUrl: string, session: Session) {
+
+      let parsed = segment.parse(session.content)
+      let sent = []
+      let quoteId = null
+      let _quote: RelayTable;
+      if (session.quote) {
+        let quote = await ctx.database.get("dcqq_relay", {
+          onebotId: [session.quote.messageId]
+        })
+        if (quote.length) {
+          quoteId = quote[0].dcId
+          _quote = quote[0]
+        } else {
+          logger.info('quote not found %o', session.quote)
+        }
+      }
+      let embeds: Embed[] = []
+
+      if (quoteId) {
+        let quotedUsername;
+        let quotedAvatar;
+
+        const quotedMsg = await onebot.getMessage(session.channelId, _quote.onebotId)
+        if (quotedMsg.author.userId === onebot.selfId) {
+          // sent from relay bot
+          const sourceMsg = await dcBot.getMessage(relation.discordChannel, _quote.dcId)
+          quotedUsername = sourceMsg.author.nickname || sourceMsg.author.username
+          quotedAvatar = sourceMsg.author.avatar
+        } else {
+          quotedUsername = session.quote.author.nickname || session.quote.author.username
+          quotedAvatar = session.quote.author.avatar
+        }
+        quotedUsername = quotedUsername.replace(/[\\*_`~|()]/g, '\\$&')
+        embeds.push({
+          description: `${quotedUsername} <t:${Math.ceil(session.quote.timestamp / 1000)}:R> | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
+          footer: {
+            text: segment.select(segment.parse(_quote.message), 'text').toString().slice(0, 30),
+            icon_url: quotedAvatar
+          }
+        })
+      }
+      let buffer = ""
+
+      const addition = {
+        username: `[QQ:${session.userId}] ${session.username}`,
+        avatar_url: session.author.avatar,
+        embeds
+      }
+
+      async function sendEmbed(fileBuffer: ArrayBuffer, payload_json: Dict, filename: string) {
+        const fd = new FormData()
+        if (filename.endsWith(".image") || filename.endsWith(".video")) filename = "";
+        filename ||= 'file.' + (await fromBuffer(fileBuffer)).ext
+        fd.append('file', Buffer.from(fileBuffer), filename)
+        fd.append('payload_json', JSON.stringify(payload_json))
+        let r = await ctx.http.post(webhookUrl, fd, fd.getHeaders())
+        sent.push(r.id)
+      }
+      async function sendAsset(type: string, data: Dict<string>, addition: Dict) {
+        const buffer = await ctx.http.get<ArrayBuffer>(data.url, {
+          headers: { accept: type + '/*' },
+          responseType: 'arraybuffer',
+        })
+        return sendEmbed(buffer, addition, data.file)
+      }
+      for (const element of parsed) {
+        const { type, attrs, children } = element
+        if (type === 'text') {
+          buffer += attrs.content.replace(/[\\*_`~|()]/g, '\\$&').replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
+        }
+        else if (type === 'at') {
+          if (attrs.id === onebot.selfId) {
+            continue;
+          }
+
+          let info = await onebot.getGuildMember(session.guildId, attrs.id)
+          buffer += `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `
+        } else if (type === "image" && attrs.type === "flash") {
+          // do nothing
+        } else if (type === "image" || type === "video") {
+          await sendAsset(type, attrs, {
+            ...addition,
+            content: buffer.trim(),
+          })
+          buffer = ""
+        } else if (type === "face") {
+          let alt = get(attrs.id)
+          buffer += alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`
+        } else if (type === "forward") {
+          buffer += '转发消息: `' + attrs.id + '`'
+        } else if (type === "code") {
+          buffer += '`' + attrs.content + '`'
+        }
+      }
+      if (buffer) {
+        sent.push((await ctx.http.post(webhookUrl, { ...addition, content: buffer })).id)
+      }
+      const hasForward = segment.select(parsed, 'forward').length
+      if (hasForward) {
+        createForward(segment.select(parsed, 'forward')[0].attrs.id, sent[0])
+      }
+      for (const sentId of sent) {
+        await ctx.database.create("dcqq_relay", {
+          onebotId: session.messageId,
+          message: session.content,
+          dcId: sentId,
+          isDiscordForward: !!hasForward
+        })
+      }
+    }
+
+    const relation = config.relations.find(v => v.onebotChannel === obSes.channelId)
     const dcBot = ctx.bots.find(v => v.platform === 'discord') as unknown as DiscordBot
+    const onebot = ctx.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
 
     const url = dcBot.config.endpoint + `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true`
-    let sent = []
 
-    const onebot = ctx.bots.find(v => v.platform === 'onebot') as unknown as OneBotBot
-    let parsed = segment.parse(session.content)
-    let quoteId = null
-    let _quote: RelayTable;
-    if (session.quote) {
-      let quote = await ctx.database.get("dcqq_relay", {
-        onebotId: [session.quote.messageId]
+
+    await convertMessageToDiscord(url, obSes)
+
+    async function createForward(forward_id: string, discord_id: string) {
+      let data = await onebot.internal.getForwardMsg(forward_id)
+      const ses = dcBot.session()
+      // @ts-ignore
+      let thread = await dcBot.internal.startThreadwithMessage(relation.discordChannel, discord_id, {
+        name: forward_id,
+        auto_archive_duration: 60
       })
-      if (quote.length) {
-        quoteId = quote[0].dcId
-        _quote = quote[0]
-      } else {
-        logger.info('quote not found %o', session.quote)
-      }
-    }
-    let embeds: Embed[] = []
-
-    if (quoteId) {
-      let quotedUsername;
-      let quotedAvatar;
-
-      const quotedMsg = await onebot.getMessage(session.channelId, _quote.onebotId)
-      if (quotedMsg.author.userId === onebot.selfId) {
-        // sent from relay bot
-        const sourceMsg = await dcBot.getMessage(relation.discordChannel, _quote.dcId)
-        quotedUsername = sourceMsg.author.nickname || sourceMsg.author.username
-        quotedAvatar = sourceMsg.author.avatar
-      } else {
-        quotedUsername = session.quote.author.nickname || session.quote.author.username
-        quotedAvatar = session.quote.author.avatar
-      }
-      quotedUsername = quotedUsername.replace(/[\\*_`~|()]/g, '\\$&')
-      embeds.push({
-        description: `${quotedUsername} <t:${Math.ceil(session.quote.timestamp / 1000)}:R> | [[ ↑ ]](https://discord.com/channels/${relation.discordGuild}/${relation.discordChannel}/${quoteId})`,
-        footer: {
-          text: segment.select(segment.parse(_quote.message), 'text').toString().slice(0, 30),
-          icon_url: quotedAvatar
+      for (const [idx, msg] of data.entries()) {
+        // @ts-ignore
+        let { time, content, group_id, sender } = msg
+        if (Array.isArray(content)) {
+          // 合并转发套娃
+          // @ts-ignore
+          content = [segment.text('转发消息不处理, '), segment('code', { content: JSON.stringify(content) })]
         }
-      })
-    }
-    let buffer = ""
+        await OneBot.adaptMessage(onebot, {
+          time, message: content, message_type: "group",
+          // @ts-ignore
+          sender: {
+            tiny_id: sender.user_id.toString(),
+            user_id: sender.user_id,
+            nickname: sender.nickname
+          },
+          message_id: (group_id + time + sender.user_id + idx) % 100000000,
+        }, ses)
 
-    const addition = {
-      username: `[QQ:${session.userId}] ${session.username}`,
-      avatar_url: session.author.avatar,
-      embeds
-    }
-
-    async function sendEmbed(fileBuffer: ArrayBuffer, payload_json: Dict, filename: string) {
-      const fd = new FormData()
-      if (filename.endsWith(".image") || filename.endsWith(".video")) filename = "";
-      filename ||= 'file.' + (await fromBuffer(fileBuffer)).ext
-      fd.append('file', Buffer.from(fileBuffer), filename)
-      fd.append('payload_json', JSON.stringify(payload_json))
-      let r = await ctx.http.post(url, fd, fd.getHeaders())
-      sent.push(r.id)
-    }
-
-    async function sendAsset(type: string, data: Dict<string>, addition: Dict) {
-      const buffer = await ctx.http.get<ArrayBuffer>(data.url, {
-        headers: { accept: type + '/*' },
-        responseType: 'arraybuffer',
-      })
-      return sendEmbed(buffer, addition, data.file)
-    }
-
-    for (const element of parsed) {
-      const { type, attrs, children } = element
-      if (type === 'text') {
-        buffer += attrs.content.replace(/[\\*_`~|()]/g, '\\$&').replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
+        await convertMessageToDiscord(dcBot.config.endpoint + `/webhooks/${relation.webhookId}/${relation.webhookToken}?wait=true&thread_id=${thread.id}`, ses)
       }
-      else if (type === 'at') {
-        if (attrs.id === onebot.selfId) {
-          continue;
-        }
-
-        let info = await onebot.getGuildMember(session.guildId, attrs.id)
-        buffer += `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `
-      } else if (type === "image" && attrs.type === "flash") {
-        // do nothing
-      } else if (type === "image" || type === "video") {
-        await sendAsset(type, attrs, {
-          ...addition,
-          content: buffer.trim(),
-        })
-        buffer = ""
-      } else if (type === "face") {
-        let alt = get(attrs.id)
-        buffer += alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`
-      }
-    }
-    if (buffer) {
-      sent.push((await ctx.http.post(url, { ...addition, content: buffer })).id)
-    }
-    for (const sentId of sent) {
-      await ctx.database.create("dcqq_relay", {
-        onebotId: session.messageId,
-        message: session.content,
-        dcId: sentId
+      // @ts-ignore
+      await dcBot.internal.modifyChannel(thread.id, {
+        archived: true,
+        locked: true
       })
     }
   })
