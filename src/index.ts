@@ -295,10 +295,11 @@ export async function apply(ctx: Context, config: Config) {
         })
         return sendEmbed(buffer, addition, data.file)
       }
+      const sanity = (val: string) => val.replace(/[\\*_`~|()]/g, '\\$&').replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
       for (const element of parsed) {
         const { type, attrs, children } = element
         if (type === 'text') {
-          buffer += attrs.content.replace(/[\\*_`~|()]/g, '\\$&').replace(/@everyone/g, () => '\\@everyone').replace(/@here/g, () => '\\@here')
+          buffer += sanity(attrs.content)
         }
         else if (type === 'at') {
           if (attrs.id === onebot.selfId) {
@@ -306,7 +307,7 @@ export async function apply(ctx: Context, config: Config) {
           }
 
           let info = await onebot.getGuildMember(session.guildId, attrs.id)
-          buffer += `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `
+          buffer += `@[QQ: ${attrs.id}]${sanity(info.nickname ?? info.username)} `
         } else if (type === "image" && attrs.type === "flash") {
           // do nothing
         } else if (type === "image" || type === "video") {
