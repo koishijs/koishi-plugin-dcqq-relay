@@ -8,7 +8,7 @@ import {
   Universal,
 } from "koishi";
 import { OneBotBot, OneBot } from "@koishijs/plugin-adapter-onebot";
-import { Discord, DiscordBot } from "@koishijs/plugin-adapter-discord";
+import { DiscordBot } from "@koishijs/plugin-adapter-discord";
 import {
   GuildMember,
   Role,
@@ -36,7 +36,6 @@ export interface RelayTable {
   onebotId: string;
   deleted: number;
   message: string;
-  isDiscordForward: boolean;
 }
 
 declare module "koishi" {
@@ -65,8 +64,7 @@ export async function apply(ctx: Context, config: Config) {
       dcId: "string",
       onebotId: "string",
       deleted: "integer",
-      message: "text",
-      isDiscordForward: { type: "boolean", initial: false },
+      message: "text"
     },
     {
       autoInc: true,
@@ -111,13 +109,6 @@ export async function apply(ctx: Context, config: Config) {
         (v) => v.platform === "discord"
       ) as unknown as DiscordBot;
       try {
-        if (data.isDiscordForward) {
-          const msg = await dcBot.internal.getChannelMessage(
-            discordChannel.discordChannel,
-            data.dcId
-          );
-          await dcBot.internal.deleteChannel(msg.thread.id);
-        }
         await dcBot.deleteMessage(discordChannel.discordChannel, data.dcId);
       } catch (e) {
         if (e.response?.data) {
@@ -131,9 +122,7 @@ export async function apply(ctx: Context, config: Config) {
   });
 
   const adaptDiscordMessage = async (session: Session) => {
-    const dcBot = ctx.bots.find(
-      (v) => v.platform === "discord"
-    ) as unknown as DiscordBot;
+    const dcBot = session.bot as DiscordBot
     const msg = await dcBot.internal.getChannelMessage(
       session.channelId,
       session.messageId
@@ -223,25 +212,28 @@ export async function apply(ctx: Context, config: Config) {
     const onebot = ctx.bots.find(
       (v) => v.platform === "onebot"
     ) as unknown as OneBotBot;
-    let data = await ctx.database.get("dcqq_relay", {
+    let [data] = await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId],
       deleted: [0],
     });
+    if (!data) return;
+    if (session.content === data.message) {
+      // webhook's avatar update
+      return;
+    }
     const onebotChannel = config.relations.find(
       (v) => v.discordChannel === session.channelId
     ).onebotChannel;
-    if (data.length) {
-      data[0].deleted = 1;
-      await ctx.database.upsert("dcqq_relay", data);
-      try {
-        await onebot.deleteMessage("", data[0].onebotId);
-      } catch (e) { }
-      const msg = await adaptDiscordMessage(session);
-      msg.children.push(segment.text("(edited)"));
-      data[0].onebotId = (await onebot.sendMessage(onebotChannel, msg))[0];
-      data[0].deleted = 0;
-      await ctx.database.upsert("dcqq_relay", data);
-    }
+    data.deleted = 1;
+    await ctx.database.upsert("dcqq_relay", [data]);
+    try {
+      await onebot.deleteMessage("", data.onebotId);
+    } catch (e) { }
+    const msg = await adaptDiscordMessage(session);
+    msg.children.push(segment.text("(edited)"));
+    data.onebotId = (await onebot.sendMessage(onebotChannel, msg))[0];
+    data.deleted = 0;
+    await ctx.database.upsert("dcqq_relay", [data]);
   });
 
   validCtx.platform("discord").on("message", async (session) => {
@@ -252,7 +244,6 @@ export async function apply(ctx: Context, config: Config) {
       (v) => v.platform === "onebot"
     ) as unknown as OneBotBot;
     const msg = await adaptDiscordMessage(session);
-    console.log(msg);
     let sent = await onebot.sendMessage(relation.onebotChannel, msg);
     for (const sentId of sent.filter((v) => v)) {
       await ctx.database.create("dcqq_relay", {
@@ -263,137 +254,137 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
 
-  validCtx.platform("onebot").on("message", async (obSes) => {
-    async function convertMessageToDiscord(
-      webhookUrl: string,
-      session: Session
-    ) {
-      let quoteId = null;
-      let _quote: RelayTable;
-
-      let result: segment = <message />;
-      if (session.quote) {
-        let quote = await ctx.database.get("dcqq_relay", {
-          onebotId: [session.quote.messageId],
-        });
-        if (quote.length) {
-          quoteId = quote[0].dcId;
-          _quote = quote[0];
-          console.log(quoteId);
-          result.children.push(<quote id={quoteId} />);
-        } else {
-          logger.info("quote not found %o", session.quote);
-        }
-      }
-
-      const sanity = (val: string) =>
-        val
-          .replace(/[\\*_`~|()]/g, "\\$&")
-          .replace(/@everyone/g, () => "\\@everyone")
-          .replace(/@here/g, () => "\\@here");
-      let tmp = await segment.transformAsync(session.elements, {
-        async at(attrs) {
-          if (attrs.id === onebot.selfId) {
-            return "";
-          }
-
-          let info = await onebot.getGuildMember(session.guildId, attrs.id);
-          return `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `;
-        },
-        async image(attrs) {
-          if (attrs.type === "flash") {
-            return "";
-          }
-          return segment.image(attrs.url);
-        },
-        async video(attrs) {
-          return segment.video(attrs.url);
-        },
-        face(attrs) {
-          let alt = get(attrs.id);
-          return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
-        },
-        async forward(attrs) {
-          let data = await onebot.internal.getForwardMsg(attrs.id);
-          let msgs: Universal.Message[] = [];
-          for (const [i, v] of data.entries()) {
-            const ses = dcBot.session();
-            let { time, content, group_id, sender } = v;
-            if (Array.isArray(content)) {
-              content = "转发消息不处理";
-            }
-            let ob = await OneBot.adaptMessage(
-              onebot,
-              {
-                time,
-                message: content,
-                message_type: "group",
-                // @ts-ignore
-                sender: {
-                  tiny_id: sender.user_id.toString(),
-                  user_id: sender.user_id,
-                  nickname: sender.nickname,
-                },
-                message_id: (group_id + time + sender.user_id + i) % 100000000,
-              },
-              ses
-            );
-            msgs.push(ob);
-          }
-          let tmp = (
-            <message forward>
-              {msgs.map((v, i) => {
-                console.log("msg", v);
-                return (
-                  <message>
-                    <author
-                      nickname={`[QQ: ${v.author.userId}] ${v.author.username}`}
-                      avatar={v.author.avatar}
-                    ></author>
-                    {v.elements}
-                  </message>
-                );
-              })}
-            </message>
-          );
-          return tmp;
-        },
-      });
-      result.children.push(
-        <author
-          nickname={`[QQ:${session.userId}] ${session.username}`}
-          avatar={session.author.avatar}
-        />
-      );
-      result.children = [...result.children, ...tmp];
-      console.log(relation.discordChannel, result);
-      let sent = await dcBot.sendMessage(
-        relation.discordChannel,
-        result,
-        relation.discordGuild
-      );
-
-      for (const sentId of sent) {
-        await ctx.database.create("dcqq_relay", {
-          onebotId: session.messageId,
-          message: session.content,
-          dcId: sentId,
-          // isDiscordForward: !!hasForward,
-        });
-      }
-    }
-
+  validCtx.platform("onebot").on("message", async (session) => {
     const relation = config.relations.find(
-      (v) => v.onebotChannel === obSes.channelId
+      (v) => v.onebotChannel === session.channelId
     );
     const dcBot = ctx.bots.find(
       (v) => v.platform === "discord"
     ) as unknown as DiscordBot;
-    const onebot = ctx.bots.find(
-      (v) => v.platform === "onebot"
-    ) as unknown as OneBotBot;
+    const onebot = session.bot as OneBotBot;
 
-    await convertMessageToDiscord("", obSes);
+    let result: segment = <message />;
+    if (session.quote) {
+      let [quote] = await ctx.database.get("dcqq_relay", {
+        onebotId: [session.quote.messageId],
+      });
+      if (quote) {
+        result.children.push(<quote id={quote.dcId} />);
+      } else {
+        logger.info("quote not found %o", session.quote);
+      }
+    }
+
+    const sanity = (val: string) =>
+      val
+        .replace(/[\\*_`~|()]/g, "\\$&")
+        .replace(/@everyone/g, () => "\\@everyone")
+        .replace(/@here/g, () => "\\@here");
+    let tmp = await segment.transformAsync(session.elements, {
+      async at(attrs) {
+        if (attrs.id === onebot.selfId) {
+          return "";
+        }
+
+        let info = await onebot.getGuildMember(session.guildId, attrs.id);
+        return `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `;
+      },
+      async image(attrs) {
+        if (attrs.type === "flash") {
+          return "";
+        }
+        return segment.image(attrs.url);
+      },
+      async video(attrs) {
+        return segment.video(attrs.url);
+      },
+      audio: '[语音]',
+      face(attrs) {
+        let alt = get(attrs.id);
+        return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
+      },
+      async forward(attrs) {
+        let data = await onebot.internal.getForwardMsg(attrs.id);
+        let msgs: Universal.Message[] = [];
+        for (const [i, v] of data.entries()) {
+          const ses = dcBot.session();
+          // @ts-ignore
+          let { time, content, group_id, sender } = v;
+          if (Array.isArray(content)) {
+            content = "转发消息不处理";
+          }
+          let ob = await OneBot.adaptMessage(
+            onebot,
+            {
+              time,
+              message: content,
+              message_type: "group",
+              // @ts-ignore
+              sender: {
+                tiny_id: sender.user_id.toString(),
+                user_id: sender.user_id,
+                nickname: sender.nickname,
+              },
+              message_id: (group_id + time + sender.user_id + i) % 100000000,
+            },
+            ses
+          );
+          msgs.push(ob);
+        }
+        let tmp = (
+          <message forward>
+            {msgs.map(v => {
+              let newElements = segment.transform(v.elements, {
+                at: (attrs) => `@[QQ: ${attrs.id}]`,
+                image(attrs) {
+                  if (attrs.type === "flash") {
+                    return "";
+                  }
+                  return segment.image(attrs.url);
+                },
+                video(attrs) {
+                  return segment.video(attrs.url);
+                },
+                face(attrs) {
+                  let alt = get(attrs.id);
+                  return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
+                }
+              })
+              return (
+                <message>
+                  <author
+                    nickname={`[QQ: ${v.author.userId}] ${v.author.username}`}
+                    avatar={v.author.avatar}
+                  ></author>
+                  {newElements}
+                </message>
+              );
+            })}
+          </message>
+        );
+        return tmp;
+      },
+    });
+    result.children.push(
+      <author
+        nickname={`[QQ:${session.userId}] ${session.username}`}
+        avatar={session.author.avatar}
+      />
+    );
+    result.children = [...result.children, ...tmp];
+    let sent = await dcBot.sendMessage(
+      relation.discordChannel,
+      result,
+      relation.discordGuild
+    );
+
+    for (const sentId of sent) {
+      await ctx.database.create("dcqq_relay", {
+        onebotId: session.messageId,
+        message: session.content,
+        dcId: sentId
+      });
+    }
   });
 
   ctx
