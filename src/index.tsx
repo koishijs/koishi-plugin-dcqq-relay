@@ -48,8 +48,8 @@ export const Config: Schema<Config> = Schema.object({
   relations: Schema.array(
     Schema.object({
       onebotChannel: Schema.string().required().description("转发至的 QQ 群号"),
-      discordChannel: Schema.string().hidden(),
-      discordGuild: Schema.string().hidden(),
+      discordChannel: Schema.string().required(),
+      discordGuild: Schema.string().required(),
     })
   ),
 });
@@ -208,7 +208,6 @@ export async function apply(ctx: Context, config: Config) {
   };
 
   validCtx.platform("discord").on("message-updated", async (session) => {
-    // await meta.preprocess()
     const onebot = ctx.bots.find(
       (v) => v.platform === "onebot"
     ) as unknown as OneBotBot;
@@ -217,10 +216,6 @@ export async function apply(ctx: Context, config: Config) {
       deleted: [0],
     });
     if (!data) return;
-    if (session.content === data.message) {
-      // webhook's avatar update
-      return;
-    }
     const onebotChannel = config.relations.find(
       (v) => v.discordChannel === session.channelId
     ).onebotChannel;
@@ -287,7 +282,7 @@ export async function apply(ctx: Context, config: Config) {
         }
 
         let info = await onebot.getGuildMember(session.guildId, attrs.id);
-        return `@[QQ: ${attrs.id}]${info.nickname ?? info.username} `;
+        return `@[QQ: ${attrs.id}]${info.nickname || info.username} `;
       },
       async image(attrs) {
         if (attrs.type === "flash") {
