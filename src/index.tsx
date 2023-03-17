@@ -208,6 +208,17 @@ export async function apply(ctx: Context, config: Config) {
   };
 
   validCtx.platform("discord").on("message-updated", async (session) => {
+
+    const dcBot = ctx.bots.find(
+      (v) => v.platform === "discord"
+    ) as unknown as DiscordBot;
+    const dcMsg = await dcBot.internal.getChannelMessage(session.channelId, session.messageId)
+    if (dcMsg.application_id === dcBot.selfId) {
+      return
+    }
+    if (dcMsg.author.id === dcBot.selfId) {
+      return
+    }
     const onebot = ctx.bots.find(
       (v) => v.platform === "onebot"
     ) as unknown as OneBotBot;
