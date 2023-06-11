@@ -35,7 +35,6 @@ export interface RelayTable {
   dcId: string;
   onebotId: string;
   deleted: number;
-  message: string;
 }
 
 declare module "koishi" {
@@ -63,8 +62,7 @@ export async function apply(ctx: Context, config: Config) {
       id: "unsigned",
       dcId: "string",
       onebotId: "string",
-      deleted: "integer",
-      message: "text"
+      deleted: "integer"
     },
     {
       autoInc: true,
@@ -86,9 +84,7 @@ export async function apply(ctx: Context, config: Config) {
     if (data) {
       data.deleted = 1;
       await ctx.database.upsert("dcqq_relay", [data]);
-      const onebot = session.app.bots.find(
-        (v) => v.platform === "onebot"
-      ) as unknown as OneBotBot;
+      const onebot = session.app.bots.find((v) => v.platform === "onebot") as unknown as OneBotBot;
       try {
         await onebot.deleteMessage("", data.onebotId);
       } catch (e) { }
@@ -115,9 +111,6 @@ export async function apply(ctx: Context, config: Config) {
           await session.send("删除 DC 消息失败: " + e.response.data.message);
         }
       }
-      // if (discordChannel.discordLogChannel) {
-      //   await dcBot.sendMessage(discordChannel.discordLogChannel, `[QQ:${session.userId}]撤回消息:\n${data[0].message}`)
-      // }
     }
   });
 
@@ -184,7 +177,7 @@ export async function apply(ctx: Context, config: Config) {
           return `@[身份组]${roles.find((r) => r.id === attrs.role)?.name || "未知"
             } `;
         }
-      },
+      }
     });
     result.children = result.children.concat(tmp);
     result.children = result.children.concat(
@@ -208,10 +201,7 @@ export async function apply(ctx: Context, config: Config) {
   };
 
   validCtx.platform("discord").on("message-updated", async (session) => {
-
-    const dcBot = ctx.bots.find(
-      (v) => v.platform === "discord"
-    ) as unknown as DiscordBot;
+    const dcBot = session.bot as unknown as DiscordBot;
     const dcMsg = await dcBot.internal.getChannelMessage(session.channelId, session.messageId)
     if (dcMsg.application_id === dcBot.selfId) {
       return
@@ -226,19 +216,30 @@ export async function apply(ctx: Context, config: Config) {
       dcId: [session.messageId],
       deleted: [0],
     });
-    if (!data) return;
+    if (!data && !dcMsg.interaction) return;
+
     const onebotChannel = config.relations.find(
       (v) => v.discordChannel === session.channelId
     ).onebotChannel;
-    data.deleted = 1;
-    await ctx.database.upsert("dcqq_relay", [data]);
-    try {
-      await onebot.deleteMessage("", data.onebotId);
-    } catch (e) { }
+    if (data) {
+      await ctx.database.upsert("dcqq_relay", [data]);
+      try {
+        await onebot.deleteMessage("", data.onebotId);
+      } catch (e) { }
+    } else {
+      // @ts-ignore
+      data = {
+        dcId: session.messageId // interaction waiting
+      }
+    }
+
     const msg = await adaptDiscordMessage(session);
-    msg.children.push(segment.text("(edited)"));
+    if (dcMsg.interaction) {
+      msg.children = [segment.text(`${dcMsg.interaction.user.username} /${dcMsg.interaction.name}\n`), ...msg.children]
+    } else {
+      msg.children.push(segment.text("(edited)"));
+    }
     data.onebotId = (await onebot.sendMessage(onebotChannel, msg))[0];
-    data.deleted = 0;
     await ctx.database.upsert("dcqq_relay", [data]);
   });
 
@@ -249,12 +250,21 @@ export async function apply(ctx: Context, config: Config) {
     const onebot = session.app.bots.find(
       (v) => v.platform === "onebot"
     ) as unknown as OneBotBot;
+    const dcBot = session.bot as unknown as DiscordBot;
+
+    if (!session.elements.length) {
+      // call command?
+      let remote = await dcBot.internal.getChannelMessage(session.channelId, session.messageId)
+      if (remote.interaction) {
+        return;
+      }
+    }
+
     const msg = await adaptDiscordMessage(session);
     let sent = await onebot.sendMessage(relation.onebotChannel, msg);
     for (const sentId of sent.filter((v) => v)) {
       await ctx.database.create("dcqq_relay", {
         onebotId: sentId,
-        message: session.content,
         dcId: session.messageId,
       });
     }
@@ -280,12 +290,6 @@ export async function apply(ctx: Context, config: Config) {
         logger.info("quote not found %o", session.quote);
       }
     }
-
-    const sanity = (val: string) =>
-      val
-        .replace(/[\\*_`~|()]/g, "\\$&")
-        .replace(/@everyone/g, () => "\\@everyone")
-        .replace(/@here/g, () => "\\@here");
     let tmp = await segment.transformAsync(session.elements, {
       async at(attrs) {
         if (attrs.id === onebot.selfId) {
@@ -302,7 +306,9 @@ export async function apply(ctx: Context, config: Config) {
         return segment.image(attrs.url);
       },
       async video(attrs) {
-        return segment.video(attrs.url);
+        return segment.video(attrs.url, {
+          file: 'video.mp4'
+        });
       },
       audio: '[语音]',
       face(attrs) {
@@ -370,6 +376,19 @@ export async function apply(ctx: Context, config: Config) {
         );
         return tmp;
       },
+      text(attrs) {
+        attrs.content = attrs.content.replace(/^(\d+)\./, '$1\u200B.')
+        let tmp = []
+        let splited = attrs.content.matchAll(/\b((?:[a-z][\w-]+:(?:\/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}\/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))/g)
+        let nowIndex = 0
+        for (const item of splited) {
+          tmp.push(attrs.content.slice(nowIndex, item.index))
+          tmp.push(<a href={item[0]}>Link</a>)
+          nowIndex = item.index + item[0].length
+        }
+        tmp.push(attrs.content.slice(nowIndex))
+        return tmp
+      }
     });
     result.children.push(
       <author
@@ -387,7 +406,6 @@ export async function apply(ctx: Context, config: Config) {
     for (const sentId of sent) {
       await ctx.database.create("dcqq_relay", {
         onebotId: session.messageId,
-        message: session.content,
         dcId: sentId
       });
     }
