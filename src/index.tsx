@@ -115,6 +115,18 @@ export async function apply(ctx: Context, config: Config) {
   });
 
   const adaptDiscordMessage = async (session: Session) => {
+    const getUserName = (member: Partial<GuildMember>) => {
+      if (member.user.discriminator === "0") {
+        // @ts-ignore
+        return `${member.nick || member.user.global_name}(@${member.user.username})`
+      } else {
+        if (member.nick && member.nick !== member.user.username) {
+          username = `${member.nick}(${member.user.username}#${member.user.discriminator})`;
+        } else {
+          username = `${member.user.username}#${member.user.discriminator}`;
+        }
+      }
+    }
     const dcBot = session.bot as DiscordBot
     const msg = await dcBot.internal.getChannelMessage(
       session.channelId,
@@ -134,10 +146,16 @@ export async function apply(ctx: Context, config: Config) {
     }
 
     let username;
-    if (session.author.nickname !== session.author.username) {
-      username = `${session.author.nickname}(${session.author.username}#${session.author.discriminator})`;
+    if (msg.author.discriminator === "0") {
+      // if(session.discord.member.nick)
+      // @ts-ignore
+      username = msg.author.global_name ? `${msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
     } else {
-      username = `${session.author.username}#${session.author.discriminator}`;
+      if (session.author.nickname !== session.author.username) {
+        username = `${session.author.nickname}(${session.author.username}#${session.author.discriminator})`;
+      } else {
+        username = `${session.author.username}#${session.author.discriminator}`;
+      }
     }
 
     result.children.push(segment.text(`${username}: \n`));
@@ -157,19 +175,12 @@ export async function apply(ctx: Context, config: Config) {
         } else if (attrs.type === "all") {
           return "@everyone";
         }
-        const dcBot = session.bot;
         if (attrs.id) {
           let member =
             members[attrs.id] ||
             (await dcBot.internal.getGuildMember(session.guildId, attrs.id));
           members[attrs.id] = member;
-          let username;
-
-          if (member.nick && member.nick !== member.user.username) {
-            username = `${member.nick}(${member.user.username}#${member.user.discriminator})`;
-          } else {
-            username = `${member.user.username}#${member.user.discriminator}`;
-          }
+          let username = getUserName(member)
           return `@${username} `;
         }
         if (attrs.role) {
