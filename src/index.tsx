@@ -4,17 +4,14 @@ import {
   Logger,
   segment,
   Schema,
-  h,
   Universal,
 } from "koishi";
-import { OneBotBot, OneBot } from "@koishijs/plugin-adapter-onebot";
 import { DiscordBot } from "@koishijs/plugin-adapter-discord";
 import {
   GuildMember,
   Role,
   snowflake,
 } from "@satorijs/adapter-discord/lib/types";
-import type { } from "@koishijs/plugin-adapter-onebot";
 import { get } from "qface";
 
 interface RelayRelation {
@@ -53,7 +50,7 @@ export const Config: Schema<Config> = Schema.object({
   ),
 });
 
-export const using = ["database"] as const;
+export const inject = ["database"] as const;
 
 export async function apply(ctx: Context, config: Config) {
   ctx.model.extend(
@@ -84,7 +81,7 @@ export async function apply(ctx: Context, config: Config) {
     if (data) {
       data.deleted = 1;
       await ctx.database.upsert("dcqq_relay", [data]);
-      const onebot = session.app.bots.find((v) => v.platform === "onebot") as unknown as OneBotBot;
+      const onebot = session.app.bots.find((v) => v.platform === "onebot");
       try {
         await onebot.deleteMessage("", data.onebotId);
       } catch (e) { }
@@ -103,7 +100,7 @@ export async function apply(ctx: Context, config: Config) {
       );
       const dcBot = session.app.bots.find(
         (v) => v.platform === "discord"
-      ) as unknown as DiscordBot;
+      );
       try {
         await dcBot.deleteMessage(discordChannel.discordChannel, data.dcId);
       } catch (e) {
@@ -127,7 +124,7 @@ export async function apply(ctx: Context, config: Config) {
         }
       }
     }
-    const dcBot = session.bot as DiscordBot
+    const dcBot = session.bot as unknown as DiscordBot
     const msg = await dcBot.internal.getChannelMessage(
       session.channelId,
       session.messageId
@@ -138,7 +135,7 @@ export async function apply(ctx: Context, config: Config) {
     let result: segment = <message></message>;
     if (session.quote) {
       let quote = await ctx.database.get("dcqq_relay", {
-        dcId: [session.quote.messageId],
+        dcId: [session.quote.id],
       });
       if (quote.length) {
         result.children.push(segment.quote(quote[0].onebotId));
@@ -151,10 +148,10 @@ export async function apply(ctx: Context, config: Config) {
       // @ts-ignore
       username = msg.author.global_name ? `${msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
     } else {
-      if (session.author.nickname !== session.author.username) {
-        username = `${session.author.nickname}(${session.author.username}#${session.author.discriminator})`;
+      if (session.author.nick !== session.author.name) {
+        username = `${session.author.nick}(${session.author.name}#${session.author.discriminator})`;
       } else {
-        username = `${session.author.username}#${session.author.discriminator}`;
+        username = `${session.author.name}#${session.author.discriminator}`;
       }
     }
 
@@ -220,9 +217,7 @@ export async function apply(ctx: Context, config: Config) {
     if (dcMsg.author.id === dcBot.selfId) {
       return
     }
-    const onebot = ctx.bots.find(
-      (v) => v.platform === "onebot"
-    ) as unknown as OneBotBot;
+    const onebot = ctx.bots.find((v) => v.platform === "onebot");
     let [data] = await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId],
       deleted: [0],
@@ -258,9 +253,7 @@ export async function apply(ctx: Context, config: Config) {
     const relation = config.relations.find(
       (v) => v.discordChannel === session.channelId
     );
-    const onebot = session.app.bots.find(
-      (v) => v.platform === "onebot"
-    ) as unknown as OneBotBot;
+    const onebot = session.app.bots.find((v) => v.platform === "onebot");
     const dcBot = session.bot as unknown as DiscordBot;
 
     if (!session.elements.length) {
@@ -288,12 +281,12 @@ export async function apply(ctx: Context, config: Config) {
     const dcBot = ctx.bots.find(
       (v) => v.platform === "discord"
     ) as unknown as DiscordBot;
-    const onebot = session.bot as OneBotBot;
-
+    const onebot = session.bot;
+    if (session.author.id === session.bot.selfId) return;
     let result: segment = <message />;
     if (session.quote) {
       let [quote] = await ctx.database.get("dcqq_relay", {
-        onebotId: [session.quote.messageId],
+        onebotId: [session.quote.id],
       });
       if (quote) {
         result.children.push(<quote id={quote.dcId} />);
@@ -308,7 +301,7 @@ export async function apply(ctx: Context, config: Config) {
         }
 
         let info = await onebot.getGuildMember(session.guildId, attrs.id);
-        return `@[QQ: ${attrs.id}]${info.nickname || info.username} `;
+        return `@[QQ: ${attrs.id}]${info.nick || info.name} `;
       },
       async image(attrs) {
         if (attrs.type === "flash") {
@@ -326,67 +319,67 @@ export async function apply(ctx: Context, config: Config) {
         let alt = get(attrs.id);
         return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
       },
-      async forward(attrs) {
-        let data = await onebot.internal.getForwardMsg(attrs.id);
-        let msgs: Universal.Message[] = [];
-        for (const [i, v] of data.entries()) {
-          const ses = dcBot.session();
-          // @ts-ignore
-          let { time, content, group_id, sender } = v;
-          if (Array.isArray(content)) {
-            content = "转发消息不处理";
-          }
-          let ob = await OneBot.adaptMessage(
-            onebot,
-            {
-              time,
-              message: content,
-              message_type: "group",
-              // @ts-ignore
-              sender: {
-                tiny_id: sender.user_id.toString(),
-                user_id: sender.user_id,
-                nickname: sender.nickname,
-              },
-              message_id: (group_id + time + sender.user_id + i) % 100000000,
-            },
-            ses
-          );
-          msgs.push(ob);
-        }
-        let tmp = (
-          <message forward>
-            {msgs.map(v => {
-              let newElements = segment.transform(v.elements, {
-                at: (attrs) => `@[QQ: ${attrs.id}]`,
-                image(attrs) {
-                  if (attrs.type === "flash") {
-                    return "";
-                  }
-                  return segment.image(attrs.url);
-                },
-                video(attrs) {
-                  return segment.video(attrs.url);
-                },
-                face(attrs) {
-                  let alt = get(attrs.id);
-                  return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
-                }
-              })
-              return (
-                <message>
-                  <author
-                    nickname={`[QQ: ${v.author.userId}] ${v.author.username}`}
-                    avatar={v.author.avatar}
-                  ></author>
-                  {newElements}
-                </message>
-              );
-            })}
-          </message>
-        );
-        return tmp;
-      },
+      // async forward(attrs) {
+      //   let data = await onebot.internal.getForwardMsg(attrs.id);
+      //   let msgs: Universal.Message[] = [];
+      //   for (const [i, v] of data.entries()) {
+      //     const ses = dcBot.session();
+      //     // @ts-ignore
+      //     let { time, content, group_id, sender } = v;
+      //     if (Array.isArray(content)) {
+      //       content = "转发消息不处理";
+      //     }
+      //     let ob = await OneBot.adaptMessage(
+      //       onebot,
+      //       {
+      //         time,
+      //         message: content,
+      //         message_type: "group",
+      //         // @ts-ignore
+      //         sender: {
+      //           tiny_id: sender.user_id.toString(),
+      //           user_id: sender.user_id,
+      //           nickname: sender.nickname,
+      //         },
+      //         message_id: (group_id + time + sender.user_id + i) % 100000000,
+      //       },
+      //       ses
+      //     );
+      //     msgs.push(ob);
+      //   }
+      //   let tmp = (
+      //     <message forward>
+      //       {msgs.map(v => {
+      //         let newElements = segment.transform(v.elements, {
+      //           at: (attrs) => `@[QQ: ${attrs.id}]`,
+      //           image(attrs) {
+      //             if (attrs.type === "flash") {
+      //               return "";
+      //             }
+      //             return segment.image(attrs.url);
+      //           },
+      //           video(attrs) {
+      //             return segment.video(attrs.url);
+      //           },
+      //           face(attrs) {
+      //             let alt = get(attrs.id);
+      //             return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
+      //           }
+      //         })
+      //         return (
+      //           <message>
+      //             <author
+      //               nickname={`[QQ: ${v.user.id}] ${v.member.nick}`}
+      //               avatar={v.member.avatar}
+      //             ></author>
+      //             {newElements}
+      //           </message>
+      //         );
+      //       })}
+      //     </message>
+      //   );
+      //   return tmp;
+      // },
       text(attrs) {
         attrs.content = attrs.content.replace(/^(\d+)\./, '$1\u200B.')
         let tmp = []
