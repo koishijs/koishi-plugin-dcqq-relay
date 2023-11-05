@@ -1,10 +1,8 @@
 import {
   Context,
   Session,
-  Logger,
   segment,
-  Schema,
-  Universal,
+  Schema
 } from "koishi";
 import { DiscordBot } from "@koishijs/plugin-adapter-discord";
 import {
@@ -24,9 +22,6 @@ interface RelayRelation {
 export interface Config {
   relations: RelayRelation[];
 }
-
-const logger = new Logger("relay");
-
 export interface RelayTable {
   id: number;
   dcId: string;
@@ -53,6 +48,7 @@ export const Config: Schema<Config> = Schema.object({
 export const inject = ["database"] as const;
 
 export async function apply(ctx: Context, config: Config) {
+  const logger = ctx.logger('relay')
   ctx.model.extend(
     "dcqq_relay",
     {
@@ -73,6 +69,9 @@ export async function apply(ctx: Context, config: Config) {
     ].includes(session.channelId)
   );
 
+  let dcDeletedList: string[] = []; // check on edited, send
+  ctx.setInterval(() => dcDeletedList = [], 1000 * 3600)
+
   validCtx.platform("discord").on("message-deleted", async (session) => {
     let [data] = await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId],
@@ -80,6 +79,7 @@ export async function apply(ctx: Context, config: Config) {
     });
     if (data) {
       data.deleted = 1;
+      dcDeletedList.push(session.messageId)
       await ctx.database.upsert("dcqq_relay", [data]);
       const onebot = session.app.bots.find((v) => v.platform === "onebot");
       try {
@@ -93,24 +93,24 @@ export async function apply(ctx: Context, config: Config) {
       deleted: [0],
     });
     if (data) {
-      data.deleted = 1;
-      await ctx.database.upsert("dcqq_relay", [data]);
-      const discordChannel = config.relations.find(
-        (v) => v.onebotChannel === session.channelId
-      );
-      const dcBot = session.app.bots.find(
-        (v) => v.platform === "discord"
-      );
+      const discordChannel = config.relations.find(v => v.onebotChannel === session.channelId);
+      const dcBot = session.app.bots.find((v) => v.platform === "discord");
       try {
         await dcBot.deleteMessage(discordChannel.discordChannel, data.dcId);
       } catch (e) {
         if (e.response?.data) {
           await session.send("删除 DC 消息失败: " + e.response.data.message);
         }
+      } finally {
+        await ctx.database.set("dcqq_relay", {
+          onebotId: session.messageId,
+          deleted: 0
+        }, {
+          deleted: 1
+        });
       }
     }
   });
-
   const adaptDiscordMessage = async (session: Session) => {
     const getUserName = (member: Partial<GuildMember>) => {
       if (member.user.discriminator === "0") {
@@ -125,11 +125,8 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
     const dcBot = session.bot as unknown as DiscordBot
-    const msg = await dcBot.internal.getChannelMessage(
-      session.channelId,
-      session.messageId
-    );
-    let roles: Role[] = undefined;
+    const msg = await dcBot.internal.getChannelMessage(session.channelId, session.messageId);
+    let roles: Role[] = [];
     let members: Record<snowflake, GuildMember> = {};
 
     let result: segment = <message></message>;
@@ -161,6 +158,7 @@ export async function apply(ctx: Context, config: Config) {
         <image url={`https://cdn.discordapp.com/emojis/${attrs.id}`} />
       ),
       file: (attrs) => `[文件: ${attrs.file}](${attrs.url})`,
+      record: (attrs) => `[音频: ${attrs.file}](${attrs.url})`,
       video: (attrs) => `[视频: ${attrs.file}](${attrs.url})`,
       async sharp(attrs) {
         let channel = await dcBot.internal.getChannel(attrs.id);
@@ -181,7 +179,7 @@ export async function apply(ctx: Context, config: Config) {
           return `@${username} `;
         }
         if (attrs.role) {
-          roles ||= await dcBot.internal.getGuildRoles(session.guildId);
+          if (roles.length === 0) roles = await dcBot.internal.getGuildRoles(session.guildId);
           return `@[身份组]${roles.find((r) => r.id === attrs.role)?.name || "未知"
             } `;
         }
@@ -211,9 +209,7 @@ export async function apply(ctx: Context, config: Config) {
   validCtx.platform("discord").on("message-updated", async (session) => {
     const dcBot = session.bot as unknown as DiscordBot;
     const dcMsg = await dcBot.internal.getChannelMessage(session.channelId, session.messageId)
-    if (dcMsg.application_id === dcBot.selfId) {
-      return
-    }
+    if (dcMsg.application_id === dcBot.selfId) return
     if (dcMsg.author.id === dcBot.selfId) {
       return
     }
@@ -246,6 +242,9 @@ export async function apply(ctx: Context, config: Config) {
       msg.children.push(segment.text("(edited)"));
     }
     data.onebotId = (await onebot.sendMessage(onebotChannel, msg))[0];
+    if (dcDeletedList.includes(session.messageId)) {
+      try { await onebot.deleteMessage(onebotChannel, data.onebotId) } catch (e) { }
+    }
     await ctx.database.upsert("dcqq_relay", [data]);
   });
 
@@ -299,15 +298,18 @@ export async function apply(ctx: Context, config: Config) {
         if (attrs.id === onebot.selfId) {
           return "";
         }
-
-        let info = await onebot.getGuildMember(session.guildId, attrs.id);
-        return `@[QQ: ${attrs.id}]${info.nick || info.name} `;
+        let name = ""
+        try {
+          let info = await onebot.getGuildMember(session.guildId, attrs.id);
+          name = info.user?.nick ?? info.user?.name
+        } catch (e) { }
+        return `@[QQ: ${attrs.id}]${name} `;
       },
       async image(attrs) {
         if (attrs.type === "flash") {
           return "";
         }
-        return segment.image(attrs.url);
+        return segment.image(attrs.url ?? attrs.file);
       },
       async video(attrs) {
         return segment.video(attrs.url, {
