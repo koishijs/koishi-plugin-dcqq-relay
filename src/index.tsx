@@ -145,7 +145,7 @@ export async function apply(ctx: Context, config: Config) {
     result.children.push(segment.text(`${username}: \n`));
     let tmp = await segment.transformAsync(session.elements, {
       face: (attrs) => (
-        <image url={`https://cdn.discordapp.com/emojis/${attrs.id}`} />
+        <img src={`https://cdn.discordapp.com/emojis/${attrs.id}`} />
       ),
       file: (attrs) => `[文件: ${attrs.file}](${attrs.url})`,
       record: (attrs) => `[音频: ${attrs.file}](${attrs.url})`,
@@ -298,7 +298,7 @@ export async function apply(ctx: Context, config: Config) {
         } catch (e) { }
         return `@[QQ: ${attrs.id}]${name} `;
       },
-      async image(attrs) {
+      async img(attrs) {
         if (attrs.type === "flash") {
           return "";
         }
@@ -347,7 +347,7 @@ export async function apply(ctx: Context, config: Config) {
       //       {msgs.map(v => {
       //         let newElements = segment.transform(v.elements, {
       //           at: (attrs) => `@[QQ: ${attrs.id}]`,
-      //           image(attrs) {
+      //           img(attrs) {
       //             if (attrs.type === "flash") {
       //               return "";
       //             }
