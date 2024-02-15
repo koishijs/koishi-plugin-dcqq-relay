@@ -1,15 +1,6 @@
-import {
-  Context,
-  Session,
-  segment,
-  Schema
-} from "koishi";
+import { Context, Session, segment, Schema, Universal } from "koishi";
 import { DiscordBot } from "@koishijs/plugin-adapter-discord";
-import {
-  GuildMember,
-  Role,
-  snowflake,
-} from "@satorijs/adapter-discord/lib/types";
+import { GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import { get } from "qface";
 
 interface RelayRelation {
@@ -49,8 +40,7 @@ export const inject = ["database"] as const;
 
 export async function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('relay')
-  ctx.model.extend(
-    "dcqq_relay",
+  ctx.model.extend("dcqq_relay",
     {
       id: "unsigned",
       dcId: "string",
@@ -68,8 +58,8 @@ export async function apply(ctx: Context, config: Config) {
       ...config.relations.map((v) => v.onebotChannel),
     ].includes(session.channelId)
   );
-
   let dcDeletedList: string[] = []; // check on edited, send
+  // @ts-ignore
   ctx.setInterval(() => dcDeletedList = [], 1000 * 3600)
 
   validCtx.platform("discord").on("message-deleted", async (session) => {
@@ -145,7 +135,7 @@ export async function apply(ctx: Context, config: Config) {
       // @ts-ignore
       username = msg.author.global_name ? `${msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
     } else {
-      if (session.author.nick !== session.author.name) {
+      if (session.author.nick && session.author.nick !== session.author.name) {
         username = `${session.author.nick}(${session.author.name}#${session.author.discriminator})`;
       } else {
         username = `${session.author.name}#${session.author.discriminator}`;
@@ -274,23 +264,26 @@ export async function apply(ctx: Context, config: Config) {
   });
 
   validCtx.platform("onebot").on("message", async (session) => {
-    const relation = config.relations.find(
-      (v) => v.onebotChannel === session.channelId
-    );
-    const dcBot = ctx.bots.find(
-      (v) => v.platform === "discord"
-    ) as unknown as DiscordBot;
+    const relation = config.relations.find(v => v.onebotChannel === session.channelId);
+    const dcBot = ctx.bots.find(v => v.platform === "discord") as unknown as DiscordBot;
     const onebot = session.bot;
     if (session.author.id === session.bot.selfId) return;
     let result: segment = <message />;
-    if (session.quote) {
+
+    result.children.push(
+      <author
+        name={`[QQ:${session.userId}] ${session.username}`}
+        avatar={session.author.avatar}
+      />
+    );
+    if (session.event.message.quote) {
       let [quote] = await ctx.database.get("dcqq_relay", {
-        onebotId: [session.quote.id],
+        onebotId: [session.event.message.quote.id],
       });
       if (quote) {
         result.children.push(<quote id={quote.dcId} />);
       } else {
-        logger.info("quote not found %o", session.quote);
+        logger.info("quote not found %o", session.event.message.quote);
       }
     }
     let tmp = await segment.transformAsync(session.elements, {
@@ -371,7 +364,7 @@ export async function apply(ctx: Context, config: Config) {
       //         return (
       //           <message>
       //             <author
-      //               nickname={`[QQ: ${v.user.id}] ${v.member.nick}`}
+      //               name={`[QQ: ${v.user.id}] ${v.member.nick}`}
       //               avatar={v.member.avatar}
       //             ></author>
       //             {newElements}
@@ -396,12 +389,6 @@ export async function apply(ctx: Context, config: Config) {
         return tmp
       }
     });
-    result.children.push(
-      <author
-        nickname={`[QQ:${session.userId}] ${session.username}`}
-        avatar={session.author.avatar}
-      />
-    );
     result.children = [...result.children, ...tmp];
     let sent = await dcBot.sendMessage(
       relation.discordChannel,
