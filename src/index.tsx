@@ -4,8 +4,8 @@ import { GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/type
 import { get } from "qface";
 
 interface RelayRelation {
-  discordChannel?: string;
-  discordGuild?: string;
+  discordChannel: string;
+  discordGuild: string;
   forwardChannel: string;
   forwardPlatform: string;
   // discordLogChannel?: string;
@@ -65,30 +65,27 @@ export async function apply(ctx: Context, config: Config) {
   let dcDeletedList: string[] = []; // check on edited, send
   ctx.setInterval(() => dcDeletedList = [], 1000 * 3600)
 
-  // ctx.command('test').action(async ({session}) => {
-  //   let r = await session.send("OK")
-  //   await new Promise((r) => setTimeout(r, 100))
-  //   await session.bot.deleteMessage(session.channelId, r[0])
-  // })
 
   validCtx.platform("discord").on("message-deleted", async (session) => {
     let [data] = await ctx.database.get("dcqq_relay", {
-      dcId: [session.messageId],
+      dcId: [session.messageId!],
       deleted: [0],
     });
     if (!data) return
     data.deleted = 1;
-    dcDeletedList.push(session.messageId)
+    dcDeletedList.push(session.messageId!)
     const relation = getRelation(session)
     const c = await ctx.database.getChannel(relation.forwardPlatform, relation.forwardChannel, ['assignee'])
     const forwardBot = ctx.bots[`${relation.forwardPlatform}:${c.assignee}`]
     try {
       await forwardBot.deleteMessage(data.forwardChannel, data.forwardId);
-    } catch (e) { }
+    } catch (e) {
+      logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
+      logger.error(e)
+    }
     await ctx.database.upsert("dcqq_relay", [data]);
   });
   validCtx.intersect(v => v.platform !== "discord").on("message-deleted", async (session) => {
-    // console.log(session)
     let [data] = await ctx.database.get("dcqq_relay", {
       forwardChannel: session.channelId,
       forwardId: session.messageId,
@@ -101,9 +98,8 @@ export async function apply(ctx: Context, config: Config) {
     try {
       await dcBot.deleteMessage(relation.discordChannel, data.dcId);
     } catch (e) {
-      if (e.response?.data) {
-        await session.send("删除 DC 消息失败: " + e.response.data.message);
-      }
+      logger.error("delete dc message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", relation.discordChannel, data.dcId, session.channelId, session.messageId)
+      logger.error(e)
     } finally {
       await ctx.database.set("dcqq_relay", {
         id: data.id,
@@ -114,32 +110,26 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
   const adaptDiscordMessage = async (session: Session) => {
-    const getUserName = (member: Partial<GuildMember>) => {
-      // @ts-expect-error
-      return `${member.nick || member.user.global_name}(@${member.user.username})`
-    }
     const dcBot = session.bot as unknown as DiscordBot
-    const msg = await dcBot.internal.getChannelMessage(session.channelId, session.messageId);
+    const msg = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!);
     let roles: Role[] = [];
     let members: Record<snowflake, GuildMember> = {};
 
     let result: segment = <message></message>;
     if (session.quote) {
       let quote = await ctx.database.get("dcqq_relay", {
-        dcId: [session.quote.id],
+        dcId: [session.quote.id!],
       });
       if (quote.length) {
         result.children.push(segment.quote(quote[0].forwardId));
       }
     }
 
-    let username;
-    // @ts-expect-error
-    username = msg.author.global_name ? `${msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
+    let username = msg.author.global_name ? `${msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
 
     result.children.push(segment.text(`${username}: \n`));
-    console.log(session.elements)
-    let tmp = await segment.transformAsync(session.elements, {
+    // @ts-ignore
+    let tmp: segment[] = await segment.transformAsync(session.elements, {
       face: (attrs) => (
         <img src={`https://cdn.discordapp.com/emojis/${attrs.id}`} />
       ),
@@ -160,15 +150,13 @@ export async function apply(ctx: Context, config: Config) {
         if (attrs.id) {
           let member =
             members[attrs.id] ||
-            (await dcBot.internal.getGuildMember(session.guildId, attrs.id));
+            (await dcBot.internal.getGuildMember(session.guildId!, attrs.id));
           members[attrs.id] = member;
-          let username = getUserName(member)
-          return `@${username} `;
+          return `@${member.nick ?? member.user?.global_name ?? attrs.name ?? "Unknown"}(@${member.user?.username ?? attrs.id})`
         }
         if (attrs.role) {
-          if (roles.length === 0) roles = await dcBot.internal.getGuildRoles(session.guildId);
-          return `@[身份组]${roles.find((r) => r.id === attrs.role)?.name || "未知"
-            } `;
+          if (roles.length === 0) roles = await dcBot.internal.getGuildRoles(session.guildId!);
+          return `@[身份组]${roles.find((r) => r.id === attrs.role)?.name || "未知"} `;
         }
       }
     });
@@ -184,22 +172,21 @@ export async function apply(ctx: Context, config: Config) {
         return segment.text(rtn);
       })
     );
-
     return result;
   };
 
   const getRelation = (session: Session) => config.relations.find(
     (v) => v.discordChannel === session.channelId || v.forwardPlatform + ':' + v.forwardChannel === session.cid
-  );
+  ) as RelayRelation;
 
   validCtx.platform("discord").on("message-updated", async (session) => {
-    const dcBot = session.bot;
-    const dcMsg = await dcBot.internal.getChannelMessage(session.channelId, session.messageId)
+    const dcBot = session.bot as unknown as DiscordBot;
+    const dcMsg = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!)
     if (dcMsg.application_id === dcBot.selfId) return // avatar refreshed
     if (dcMsg.author.id === dcBot.selfId) return
 
     let [data] = await ctx.database.get("dcqq_relay", {
-      dcId: [session.messageId],
+      dcId: [session.messageId!],
       deleted: [0],
     });
     if (!data && !dcMsg.interaction) return;
@@ -207,27 +194,40 @@ export async function apply(ctx: Context, config: Config) {
     let c = await ctx.database.getChannel(forwardPlatform, forwardChannel, ['assignee'])
     const forwardBot = ctx.bots[`${forwardPlatform}:${c.assignee}`]
     if (data) {
-      await ctx.database.upsert("dcqq_relay", [data]);
       try {
         await forwardBot.deleteMessage(data.forwardChannel, data.forwardId);
-      } catch (e) { }
+      } catch (e) {
+        logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
+        logger.error(e)
+      }
     } else {
       // interaction waiting
     }
 
     const msg = await adaptDiscordMessage(session);
     if (dcMsg.interaction) {
-      msg.children = [segment.text(`${dcMsg.interaction.user.username} /${dcMsg.interaction.name}\n`), ...msg.children]
+      msg.children = [segment.text(`${dcMsg.interaction.user.global_name} 使用了 /${dcMsg.interaction.name}\n`), ...msg.children]
     } else {
       msg.children.push(segment.text("(edited)"));
     }
-    data.forwardChannel = forwardChannel;
     const [forwardId] = await forwardBot.sendMessage(forwardChannel, msg);
-    data.forwardId = forwardId
-    if (dcDeletedList.includes(session.messageId)) {
-      try { await forwardBot.deleteMessage(forwardChannel, data.forwardId) } catch (e) { }
+    if (data) {
+      data.forwardId = forwardId;
+      await ctx.database.upsert("dcqq_relay", [data]);
+    } else {
+      await ctx.database.create("dcqq_relay", {
+        dcId: session.messageId!,
+        forwardChannel,
+        forwardId,
+        deleted: 0,
+      });
     }
-    await ctx.database.upsert("dcqq_relay", [data]);
+    if (dcDeletedList.includes(session.messageId!)) {
+      try { await forwardBot.deleteMessage(forwardChannel, forwardId) } catch (e) {
+        logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
+        logger.error(e)
+      }
+    }
   });
 
   validCtx.platform("discord").on("message", async (session) => {
@@ -235,9 +235,9 @@ export async function apply(ctx: Context, config: Config) {
     // const forwardBot = session.app.bots.find((v) => v.platform !== "discord");
     const dcBot = session.bot as unknown as DiscordBot;
 
-    if (!session.elements.length) {
+    if (!session.elements!.length) {
       // call command?
-      let remote = await dcBot.internal.getChannelMessage(session.channelId, session.messageId)
+      let remote = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!)
       if (remote.interaction) {
         return;
       }
@@ -266,22 +266,23 @@ export async function apply(ctx: Context, config: Config) {
         avatar={session.author.avatar}
       />
     );
-    if (session.event.message.quote) {
+    if (session.event.message?.quote) {
       let [quote] = await ctx.database.get("dcqq_relay", {
-        forwardId: [session.event.message.quote.id],
+        forwardId: [session.event.message.quote.id!],
       });
       if (quote) {
         result.children.push(<quote id={quote.dcId} />);
       } else {
-        logger.info("quote not found %o", session.event.message.quote);
+        logger.warn("quote not found %o", session.event.message.quote);
       }
     }
-    let tmp = await segment.transformAsync(session.elements, {
+    let tmp = await segment.transformAsync(session.elements!, {
       async at(attrs) {
         if (attrs.id === forwardBot.selfId) return "";
+        if (attrs.type === "all") return "@全体成员"
         let name = "Unknown"
         try {
-          let info = await forwardBot.getGuildMember(session.guildId, attrs.id);
+          let info = await forwardBot.getGuildMember(session.guildId!, attrs.id);
           name = attrs.name ?? info.nick ?? info.user?.name ?? "Unknown"
         } catch (e) { }
         return `@[QQ: ${attrs.id}]${name} `;
@@ -295,10 +296,10 @@ export async function apply(ctx: Context, config: Config) {
         });
       },
       audio: '[语音]',
-      // face(attrs) {
-      //   let alt = get(attrs.id);
-      //   return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
-      // },
+      face(attrs) {
+        let alt = get(attrs.id);
+        return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
+      },
       text(attrs) {
         attrs.content = attrs.content.replace(/^(\d+)\./, '$1\u200B.')
         let tmp = []
