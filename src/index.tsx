@@ -1,6 +1,6 @@
 import { Context, Session, segment, Schema } from "koishi";
-import { DiscordBot } from "@koishijs/plugin-adapter-discord";
-import { GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
+import type { DiscordBot } from "@koishijs/plugin-adapter-discord";
+import type { GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import { get } from "qface";
 
 interface RelayRelation {

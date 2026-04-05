@@ -22,9 +22,13 @@
     }
   },
   "dependencies": {
+    "@satorijs/element": "^3.2.0",
     "qface": "^1.4.1"
   },
   "peerDependencies": {
     "koishi": "^4.18.11"
+  },
+  "devDependencies": {
+    "@koishijs/plugin-adapter-discord": "^4.6.0"
   }
 }
