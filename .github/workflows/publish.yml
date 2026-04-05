@@ -1,0 +1,14 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  publish_npm:
+    permissions:
+      id-token: write
+      contents: read
+    uses: koikirin/buildplate/.github/workflows/publish_npm.buildplate.yml@v1
