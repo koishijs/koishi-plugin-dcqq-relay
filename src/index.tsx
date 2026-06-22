@@ -8,6 +8,8 @@ interface RelayRelation {
   discordGuild: string;
   forwardChannel: string;
   forwardPlatform: string;
+  downloadAsset: boolean;
+  showQQId: boolean;
   // discordLogChannel?: string;
 }
 
@@ -35,6 +37,8 @@ export const Config: Schema<Config> = Schema.object({
       forwardChannel: Schema.string().required().description("转发的目标群"),
       discordChannel: Schema.string().required(),
       discordGuild: Schema.string().required(),
+      downloadAsset: Schema.boolean().default(false).description("本地下载资源后发送到目标平台"),
+      showQQId: Schema.boolean().default(true).description("在 QQ 转发的消息中显示用户 ID"),
     })
   ),
 });
@@ -109,7 +113,7 @@ export async function apply(ctx: Context, config: Config) {
       });
     }
   });
-  const adaptDiscordMessage = async (session: Session) => {
+  const adaptDiscordMessage = async (session: Session, downloadAsset: boolean) => {
     const dcBot = session.bot as unknown as DiscordBot
     const msg = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!);
     let roles: Role[] = [];
@@ -125,7 +129,7 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
 
-    let username = msg.author.global_name ? `${msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
+    let username = msg.author.global_name ? `${session.event.member?.nick ?? msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
 
     result.children.push(segment.text(`${username}: \n`));
     // @ts-ignore
@@ -160,6 +164,14 @@ export async function apply(ctx: Context, config: Config) {
         }
       }
     });
+    if (downloadAsset) {
+      tmp = await segment.transformAsync(tmp, {
+        async img(attrs) {
+          const data = await ctx.http.file(attrs.src);
+          return segment.image(`data:${attrs.type};base64,${Buffer.from(data.data).toString('base64')}`, attrs.type);
+        }
+      })
+    }
     result.children = result.children.concat(tmp);
     result.children = result.children.concat(
       msg.embeds.map((embed) => {
@@ -190,7 +202,7 @@ export async function apply(ctx: Context, config: Config) {
       deleted: [0],
     });
     if (!data && !dcMsg.interaction) return;
-    const { forwardChannel, forwardPlatform } = getRelation(session)
+    const { forwardChannel, forwardPlatform, downloadAsset } = getRelation(session)
     let c = await ctx.database.getChannel(forwardPlatform, forwardChannel, ['assignee'])
     const forwardBot = ctx.bots[`${forwardPlatform}:${c.assignee}`]
     if (data) {
@@ -204,7 +216,7 @@ export async function apply(ctx: Context, config: Config) {
       // interaction waiting
     }
 
-    const msg = await adaptDiscordMessage(session);
+    const msg = await adaptDiscordMessage(session, downloadAsset);
     if (dcMsg.interaction) {
       msg.children = [segment.text(`${dcMsg.interaction.user.global_name} 使用了 /${dcMsg.interaction.name}\n`), ...msg.children]
     } else {
@@ -243,7 +255,7 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
 
-    const msg = await adaptDiscordMessage(session);
+    const msg = await adaptDiscordMessage(session, relation.downloadAsset);
     let sent = await ctx.broadcast([relation.forwardPlatform + ':' + relation.forwardChannel], msg)
     // let sent = await forwardBot.sendMessage(relation.forwardChannel, msg);
     for (const sentId of sent.filter((v) => v)) {
@@ -262,7 +274,7 @@ export async function apply(ctx: Context, config: Config) {
     let result: segment = <message />;
     result.children.push(
       <author
-        name={`[QQ:${session.userId}] ${session.username}`}
+        name={`${relation.showQQId ? `[QQ:${session.userId}] ` : ''}${session.username}`}
         avatar={session.author.avatar}
       />
     );
