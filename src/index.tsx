@@ -242,7 +242,7 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
 
-  validCtx.platform("discord").on("message", async (session) => {
+  validCtx.platform("discord").middleware(async (session) => {
     const relation = getRelation(session);
     // const forwardBot = session.app.bots.find((v) => v.platform !== "discord");
     const dcBot = session.bot as unknown as DiscordBot;
@@ -267,7 +267,7 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
 
-  validCtx.intersect(v => v.platform !== "discord").on("message", async (session) => {
+  validCtx.intersect(v => v.platform !== "discord").middleware(async (session) => {
     const relation = getRelation(session);
     const forwardBot = session.bot;
     if (session.author.id === session.bot.selfId) return;
