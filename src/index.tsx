@@ -292,10 +292,10 @@ export async function apply(ctx: Context, config: Config) {
       async at(attrs) {
         if (attrs.id === forwardBot.selfId) return "";
         if (attrs.type === "all") return "@全体成员"
-        let name = "Unknown"
+        let name = attrs.name ?? "Unknown"
         try {
           let info = await forwardBot.getGuildMember(session.guildId!, attrs.id);
-          name = attrs.name ?? info.nick ?? info.user?.name ?? "Unknown"
+          name ??= attrs.name ?? info.nick ?? info.user?.name
         } catch (e) { }
         return `@[QQ: ${attrs.id}]${name} `;
       },
