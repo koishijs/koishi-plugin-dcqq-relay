@@ -1,4 +1,4 @@
-import { Context, Session, segment, Schema } from "koishi";
+import { Bot, Context, Session, segment, Schema } from "koishi";
 import type { DiscordBot } from "@koishijs/plugin-adapter-discord";
 import type { GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import { get } from "qface";
@@ -70,25 +70,30 @@ export async function apply(ctx: Context, config: Config) {
   );
   let dcDeletedList: string[] = []; // check on edited, send
 
-  // relay row ids already being deleted. Deleting on one side fires message-deleted on the other side,
-  // which may arrive before `deleted` is written to db, so claim rows synchronously here.
-  let deletingIds = new Set<number>()
+  // messages deleted by the bot itself (sync delete / edit resend). Their message-deleted events
+  // must be ignored, otherwise the deletion bounces back and removes the original message.
+  let selfDeleted = new Set<string>()
   ctx.setInterval(() => {
     dcDeletedList = []
-    deletingIds = new Set()
+    selfDeleted = new Set()
   }, 1000 * 3600)
 
-  const claimRows = async (rows: RelayTable[]) => {
-    const claimed = rows.filter((v) => !deletingIds.has(v.id))
-    claimed.forEach((v) => deletingIds.add(v.id))
-    if (claimed.length) {
-      await ctx.database.set("dcqq_relay", { id: claimed.map((v) => v.id) }, { deleted: 1 })
+  const deleteBySelf = (bot: Bot, channelId: string, messageId: string) => {
+    selfDeleted.add(`${bot.platform}:${channelId}:${messageId}`)
+    return bot.deleteMessage(channelId, messageId)
+  }
+  const isSelfDeleted = (session: Session) => selfDeleted.has(`${session.platform}:${session.channelId}:${session.messageId}`)
+
+  const markDeleted = async (rows: RelayTable[]) => {
+    if (rows.length) {
+      await ctx.database.set("dcqq_relay", { id: rows.map((v) => v.id) }, { deleted: 1 })
     }
-    return claimed
+    return rows
   }
 
   validCtx.platform("discord").on("message-deleted", async (session) => {
-    const rows = await claimRows(await ctx.database.get("dcqq_relay", {
+    if (isSelfDeleted(session)) return
+    const rows = await markDeleted(await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId!],
       deleted: [0],
     }));
@@ -99,7 +104,7 @@ export async function apply(ctx: Context, config: Config) {
     const forwardBot = ctx.bots[`${relation.forwardPlatform}:${c.assignee}`]
     for (const data of rows) {
       try {
-        await forwardBot.deleteMessage(data.forwardChannel, data.forwardId);
+        await deleteBySelf(forwardBot, data.forwardChannel, data.forwardId);
       } catch (e) {
         logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
         logger.error(e)
@@ -107,7 +112,8 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
   validCtx.intersect(v => v.platform !== "discord").on("message-deleted", async (session) => {
-    const rows = await claimRows(await ctx.database.get("dcqq_relay", {
+    if (isSelfDeleted(session)) return
+    const rows = await markDeleted(await ctx.database.get("dcqq_relay", {
       forwardChannel: session.channelId,
       forwardId: session.messageId,
       deleted: [0],
@@ -118,7 +124,7 @@ export async function apply(ctx: Context, config: Config) {
     const dcBot = ctx.bots[`discord:${c.assignee}`]
     for (const data of rows) {
       try {
-        await dcBot.deleteMessage(relation.discordChannel, data.dcId);
+        await deleteBySelf(dcBot, relation.discordChannel, data.dcId);
       } catch (e) {
         logger.error("delete dc message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", relation.discordChannel, data.dcId, session.channelId, session.messageId)
         logger.error(e)
@@ -225,7 +231,7 @@ export async function apply(ctx: Context, config: Config) {
     const forwardBot = ctx.bots[`${forwardPlatform}:${c.assignee}`]
     if (data) {
       try {
-        await forwardBot.deleteMessage(data.forwardChannel, data.forwardId);
+        await deleteBySelf(forwardBot, data.forwardChannel, data.forwardId);
       } catch (e) {
         logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
         logger.error(e)
@@ -253,8 +259,8 @@ export async function apply(ctx: Context, config: Config) {
       });
     }
     if (dcDeletedList.includes(session.messageId!)) {
-      try { await forwardBot.deleteMessage(forwardChannel, forwardId) } catch (e) {
-        logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
+      try { await deleteBySelf(forwardBot, forwardChannel, forwardId) } catch (e) {
+        logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, forwardChannel, forwardId)
         logger.error(e)
       }
     }
