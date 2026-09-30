@@ -69,50 +69,60 @@ export async function apply(ctx: Context, config: Config) {
     ].includes(session.cid)
   );
   let dcDeletedList: string[] = []; // check on edited, send
-  ctx.setInterval(() => dcDeletedList = [], 1000 * 3600)
 
+  // relay row ids already being deleted. Deleting on one side fires message-deleted on the other side,
+  // which may arrive before `deleted` is written to db, so claim rows synchronously here.
+  let deletingIds = new Set<number>()
+  ctx.setInterval(() => {
+    dcDeletedList = []
+    deletingIds = new Set()
+  }, 1000 * 3600)
+
+  const claimRows = async (rows: RelayTable[]) => {
+    const claimed = rows.filter((v) => !deletingIds.has(v.id))
+    claimed.forEach((v) => deletingIds.add(v.id))
+    if (claimed.length) {
+      await ctx.database.set("dcqq_relay", { id: claimed.map((v) => v.id) }, { deleted: 1 })
+    }
+    return claimed
+  }
 
   validCtx.platform("discord").on("message-deleted", async (session) => {
-    let [data] = await ctx.database.get("dcqq_relay", {
+    const rows = await claimRows(await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId!],
       deleted: [0],
-    });
-    if (!data) return
-    data.deleted = 1;
+    }));
+    if (!rows.length) return
     dcDeletedList.push(session.messageId!)
     const relation = getRelation(session)
     const c = await ctx.database.getChannel(relation.forwardPlatform, relation.forwardChannel, ['assignee'])
     const forwardBot = ctx.bots[`${relation.forwardPlatform}:${c.assignee}`]
-    try {
-      await forwardBot.deleteMessage(data.forwardChannel, data.forwardId);
-    } catch (e) {
-      logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
-      logger.error(e)
+    for (const data of rows) {
+      try {
+        await forwardBot.deleteMessage(data.forwardChannel, data.forwardId);
+      } catch (e) {
+        logger.error("delete forward message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", session.channelId, session.messageId, data.forwardChannel, data.forwardId)
+        logger.error(e)
+      }
     }
-    await ctx.database.upsert("dcqq_relay", [data]);
   });
   validCtx.intersect(v => v.platform !== "discord").on("message-deleted", async (session) => {
-    let [data] = await ctx.database.get("dcqq_relay", {
+    const rows = await claimRows(await ctx.database.get("dcqq_relay", {
       forwardChannel: session.channelId,
       forwardId: session.messageId,
       deleted: [0],
-    });
-    if (!data) return
+    }));
+    if (!rows.length) return
     const relation = getRelation(session)
     let c = await ctx.database.getChannel('discord', relation.discordChannel, ['assignee'])
     const dcBot = ctx.bots[`discord:${c.assignee}`]
-    try {
-      await dcBot.deleteMessage(relation.discordChannel, data.dcId);
-    } catch (e) {
-      logger.error("delete dc message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", relation.discordChannel, data.dcId, session.channelId, session.messageId)
-      logger.error(e)
-    } finally {
-      await ctx.database.set("dcqq_relay", {
-        id: data.id,
-        deleted: 0
-      }, {
-        deleted: 1
-      });
+    for (const data of rows) {
+      try {
+        await dcBot.deleteMessage(relation.discordChannel, data.dcId);
+      } catch (e) {
+        logger.error("delete dc message failed, dc channel id %s, message id %s, forward channel %s, forward message id %s", relation.discordChannel, data.dcId, session.channelId, session.messageId)
+        logger.error(e)
+      }
     }
   });
   const adaptDiscordMessage = async (session: Session, downloadAsset: boolean, reverseName: boolean = false) => {
