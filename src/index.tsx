@@ -343,7 +343,7 @@ export async function apply(ctx: Context, config: Config) {
         let nowIndex = 0
         for (const item of splited) {
           tmp.push(attrs.content.slice(nowIndex, item.index))
-          tmp.push(<a href={item[0]}>Link</a>)
+          tmp.push(<a href={item[0]}></a>)
           nowIndex = item.index + item[0].length
         }
         tmp.push(attrs.content.slice(nowIndex))
