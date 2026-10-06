@@ -339,7 +339,7 @@ export async function apply(ctx: Context, config: Config) {
       text(attrs) {
         attrs.content = attrs.content.replace(/^(\d+)\./, '$1\u200B.')
         let tmp = []
-        let splited = attrs.content.matchAll(/\b((?:[a-z][\w-]+:\/{1,3}|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}\/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))/g)
+        let splited = attrs.content.matchAll(/(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g)
         let nowIndex = 0
         for (const item of splited) {
           tmp.push(attrs.content.slice(nowIndex, item.index))
