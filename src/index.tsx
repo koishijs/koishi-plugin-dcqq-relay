@@ -17,6 +17,7 @@ interface RelayRelation {
 export interface Config {
   relations: RelayRelation[];
   recovery: string[];
+  qqEmojiIndex: string;
 }
 export interface RelayTable {
   id: number;
@@ -45,6 +46,7 @@ export const Config: Schema<Config> = Schema.object({
     })
   ),
   recovery: Schema.array(String).default([]).description("进入恢复模式的 forwardPlatform。启动后积压这些平台相关的消息，直到执行 recovery 指令"),
+  qqEmojiIndex: Schema.string().default("https://koishi.js.org/QFace/assets/qq_emoji/_index.v2.json")
 });
 
 export const inject = ["database"] as const;
@@ -63,6 +65,13 @@ export async function apply(ctx: Context, config: Config) {
       autoInc: true,
     }
   );
+
+  const faces: {
+    emojis: Record<string, {
+      describe: string
+    }>
+  } = await ctx.http.get(config.qqEmojiIndex)
+
 
   const validCtx = ctx.intersect((session) =>
     [
@@ -421,6 +430,16 @@ export async function apply(ctx: Context, config: Config) {
       face(attrs) {
         let alt = get(attrs.id);
         return alt ? `[${alt.QDes.slice(1)}]` : `[表情: ${attrs.id}]`;
+      },
+      emoji(attrs) {
+        let alt = `[表情: ${attrs.id}]`
+        try {
+          let id = attrs.id.split(":")[1]
+          alt = `[${faces.emojis[id]?.describe?.slice(1)}]`;
+        } catch (e) {
+          logger.warn("emoji not found %o", attrs.id)
+        }
+        return alt
       },
       text(attrs) {
         attrs.content = attrs.content.replace(/^(\d+)\./, '$1\u200B.')
