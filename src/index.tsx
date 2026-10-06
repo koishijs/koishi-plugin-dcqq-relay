@@ -1,4 +1,4 @@
-import { Bot, Context, Session, segment, Schema } from "koishi";
+import { Bot, Context, Session, segment, Schema, Universal } from "koishi";
 import type { DiscordBot } from "@koishijs/plugin-adapter-discord";
 import type { GuildMember, Role, snowflake } from "@satorijs/adapter-discord/lib/types";
 import { get } from "qface";
@@ -16,6 +16,7 @@ interface RelayRelation {
 
 export interface Config {
   relations: RelayRelation[];
+  recovery: boolean;
 }
 export interface RelayTable {
   id: number;
@@ -43,6 +44,7 @@ export const Config: Schema<Config> = Schema.object({
       reverseName: Schema.boolean().default(false).description("优化发送顺序。有多媒体资源时，用户名在目标平台最后显示。（适用于 QQ）"),
     })
   ),
+  recovery: Schema.boolean().default(false).description("Recovery mode"),
 });
 
 export const inject = ["database"] as const;
@@ -84,6 +86,24 @@ export async function apply(ctx: Context, config: Config) {
   }
   const isSelfDeleted = (session: Session) => selfDeleted.has(`${session.platform}:${session.channelId}:${session.messageId}`)
 
+  const RECOVERY_PREFIX = '[RECOVERY]'
+  const isRecovery = (session: Session) => !!session.username?.startsWith(RECOVERY_PREFIX)
+  let recovering = false
+
+  // per forward channel (cid) message queue. When the plugin starts in recovery mode, new messages
+  // are held in memory until the recovery command of that channel finishes, then relayed one by one.
+  interface RelayQueue {
+    ready: boolean
+    ticket: number
+    serving: number
+  }
+  const queues = new Map<string, RelayQueue>()
+  const getQueue = (cid: string) => {
+    let queue = queues.get(cid)
+    if (!queue) queues.set(cid, queue = { ready: false, ticket: 0, serving: 0 })
+    return queue
+  }
+
   const markDeleted = async (rows: RelayTable[]) => {
     if (rows.length) {
       await ctx.database.set("dcqq_relay", { id: rows.map((v) => v.id) }, { deleted: 1 })
@@ -92,6 +112,7 @@ export async function apply(ctx: Context, config: Config) {
   }
 
   validCtx.platform("discord").on("message-deleted", async (session) => {
+    if (config.recovery) return
     if (isSelfDeleted(session)) return
     const rows = await markDeleted(await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId!],
@@ -112,6 +133,7 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
   validCtx.intersect(v => v.platform !== "discord").on("message-deleted", async (session) => {
+    if (config.recovery) return
     if (isSelfDeleted(session)) return
     const rows = await markDeleted(await ctx.database.get("dcqq_relay", {
       forwardChannel: session.channelId,
@@ -139,11 +161,16 @@ export async function apply(ctx: Context, config: Config) {
 
     let result: segment = <message></message>;
     if (session.quote) {
-      let quote = await ctx.database.get("dcqq_relay", {
-        dcId: [session.quote.id!],
-      });
-      if (quote.length) {
-        result.children.push(segment.quote(quote[0].forwardId));
+      // 来自其它频道/服务器的转发消息误触发
+      if (session.quote.channel?.id === session.channelId) {
+        let quote = await ctx.database.get("dcqq_relay", {
+          dcId: [session.quote.id!],
+        });
+        if (quote.length) {
+          result.children.push(segment.quote(quote[0].forwardId));
+        }
+      } else {
+        session.elements = [segment.text("🔁")]
       }
     }
 
@@ -216,6 +243,7 @@ export async function apply(ctx: Context, config: Config) {
   ) as RelayRelation;
 
   validCtx.platform("discord").on("message-updated", async (session) => {
+    if (config.recovery) return
     const dcBot = session.bot as unknown as DiscordBot;
     const dcMsg = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!)
     if (dcMsg.application_id === dcBot.selfId) return // avatar refreshed
@@ -267,6 +295,7 @@ export async function apply(ctx: Context, config: Config) {
   });
 
   validCtx.platform("discord").middleware(async (session) => {
+    if (config.recovery) return
     const relation = getRelation(session);
     // const forwardBot = session.app.bots.find((v) => v.platform !== "discord");
     const dcBot = session.bot as unknown as DiscordBot;
@@ -292,6 +321,21 @@ export async function apply(ctx: Context, config: Config) {
   });
 
   validCtx.intersect(v => v.platform !== "discord").middleware(async (session) => {
+    // replayed messages skip the queue, the recovery command sends them in order
+    if (!config.recovery || isRecovery(session)) return relayToDiscord(session)
+    const queue = getQueue(session.cid)
+    const ticket = queue.ticket++
+    while (!queue.ready || queue.serving !== ticket) await ctx.sleep(100)
+    try {
+      // backlog may overlap with the history that has just been recovered
+      const relayed = await ctx.database.get("dcqq_relay", { forwardChannel: session.channelId, forwardId: [session.messageId!] })
+      if (!relayed.length) await relayToDiscord(session)
+    } finally {
+      queue.serving++
+    }
+  });
+
+  const relayToDiscord = async (session: Session) => {
     const relation = getRelation(session);
     const forwardBot = session.bot;
     if (session.author.id === session.bot.selfId) return;
@@ -360,7 +404,74 @@ export async function apply(ctx: Context, config: Config) {
         dcId: sentId
       });
     }
-  });
+  };
+
+  ctx.command("recovery <begin:string> <cid:channel>")
+    .option("dry", "--dry Dry run, do not send messages")
+    .action(async ({ session, options }, beginTime, cid) => {
+      if (recovering) return
+      logger.info("recovery from %s, cid %s", beginTime, cid)
+      const begin = new Date(beginTime).getTime()
+      const [platform, channelId] = cid.split(':')
+      const relation = config.relations.find((v) => v.forwardChannel === channelId)
+      if (!relation) return `未找到频道 ${cid} 的转发配置`
+      // const c = await ctx.database.getChannel(relation.forwardPlatform, cid, ['assignee'])
+      // const forwardBot = ctx.bots[`${relation.forwardPlatform}:${c?.assignee}`]
+      // if (!forwardBot) return `未找到频道 ${cid} 的 bot`
+
+      function toUTC8String(ts: number) {
+        const utc8Date = new Date(ts + 8 * 60 * 60 * 1000);
+        return utc8Date.toISOString().replace('Z', '+08:00');
+      }
+
+      recovering = true
+      try {
+        const messages: Universal.Message[] = []
+        let next: string | undefined
+        while (true) {
+          logger.info("recovery from %s, next %s", beginTime, next)
+          // data is in ascending order, `next` is the cursor to older messages
+          const page = await session.bot.getMessageList(cid, next, 'before', 100)
+          if (!page.data.length) break
+          messages.unshift(...page.data.filter((v) => v.createdAt >= begin && v.id !== session.messageId))
+          if (page.data[0].createdAt < begin || !page.next || page.next === next) break
+          next = page.next
+        }
+        logger.info("recovery from %s, %d messages", beginTime, messages.length)
+
+        let count = 0
+        for (const m of messages) {
+          m.elements = segment.parse(m.content)
+          const relayed = await ctx.database.get("dcqq_relay", { forwardChannel: cid, forwardId: [m.id] })
+          if (relayed.length) continue
+          const s = session.bot.session({
+            type: 'message',
+            channel: { type: Universal.Channel.Type.TEXT, ...m.channel, id: channelId },
+            guild: m.guild ?? { id: channelId },
+            user: m.user,
+            member: {
+              ...m.member,
+              nick: `${RECOVERY_PREFIX} [${toUTC8String(m.createdAt)}] ` + (m.member?.nick || m.member?.name || m.user?.nick || m.user?.name),
+            },
+            message: m,
+            timestamp: m.createdAt,
+          })
+          if (!options.dry) {
+            session.bot.dispatch(s)
+          }
+          count++
+          if (!options.dry) await ctx.sleep(2000)
+        }
+        if (!options.dry) {
+          const queue = getQueue(`${session.platform}:${cid}`)
+          queue.ready = true
+          logger.info("recovery of %s done, %d pending messages", cid, queue.ticket - queue.serving)
+        }
+        return `恢复完成，共 ${count} 条消息`
+      } finally {
+        recovering = false
+      }
+    })
 
   ctx
     .command("relay", "查看同步插件帮助信息")

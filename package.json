@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-dcqq-relay",
-  "version": "0.14.2",
+  "version": "0.15.0-alpha.0",
   "main": "lib/index.js",
   "description": "Synchronize messages between discord and qq",
   "repository": {
