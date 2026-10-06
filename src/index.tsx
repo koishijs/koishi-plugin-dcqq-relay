@@ -16,7 +16,7 @@ interface RelayRelation {
 
 export interface Config {
   relations: RelayRelation[];
-  recovery: boolean;
+  recovery: string[];
 }
 export interface RelayTable {
   id: number;
@@ -44,7 +44,7 @@ export const Config: Schema<Config> = Schema.object({
       reverseName: Schema.boolean().default(false).description("优化发送顺序。有多媒体资源时，用户名在目标平台最后显示。（适用于 QQ）"),
     })
   ),
-  recovery: Schema.boolean().default(false).description("Recovery mode"),
+  recovery: Schema.array(String).default([]).description("进入恢复模式的 forwardPlatform。启动后积压这些平台相关的消息，直到执行 recovery 指令"),
 });
 
 export const inject = ["database"] as const;
@@ -87,22 +87,64 @@ export async function apply(ctx: Context, config: Config) {
   const isSelfDeleted = (session: Session) => selfDeleted.has(`${session.platform}:${session.channelId}:${session.messageId}`)
 
   const RECOVERY_PREFIX = '[RECOVERY]'
-  const isRecovery = (session: Session) => !!session.username?.startsWith(RECOVERY_PREFIX)
   let recovering = false
 
-  // per forward channel (cid) message queue. When the plugin starts in recovery mode, new messages
-  // are held in memory until the recovery command of that channel finishes, then relayed one by one.
+  // per relation message queue, shared by both sides to keep the order. When the plugin starts with
+  // the forward platform in recovery mode, new messages are held in memory until the recovery command
+  // has synced the history of that relation, then relayed one by one.
   interface RelayQueue {
     ready: boolean
     ticket: number
     serving: number
   }
-  const queues = new Map<string, RelayQueue>()
-  const getQueue = (cid: string) => {
-    let queue = queues.get(cid)
-    if (!queue) queues.set(cid, queue = { ready: false, ticket: 0, serving: 0 })
+  const queues = new Map<RelayRelation, RelayQueue>()
+  const getQueue = (relation: RelayRelation) => {
+    let queue = queues.get(relation)
+    if (!queue) queues.set(relation, queue = { ready: false, ticket: 0, serving: 0 })
     return queue
   }
+  const isRecoveryRelation = (relation: RelayRelation) => config.recovery.includes(relation.forwardPlatform)
+  const enqueue = async (relation: RelayRelation, task: () => Promise<void>) => {
+    if (!isRecoveryRelation(relation)) return task()
+    const queue = getQueue(relation)
+    const ticket = queue.ticket++
+    while (!queue.ready || queue.serving !== ticket) await ctx.sleep(100)
+    try {
+      await task()
+    } finally {
+      queue.serving++
+    }
+  }
+
+  const isRelayed = async (session: Session) => {
+    const rows = session.platform === "discord"
+      ? await ctx.database.get("dcqq_relay", { dcId: [session.messageId!] })
+      : await ctx.database.get("dcqq_relay", { forwardChannel: session.channelId, forwardId: [session.messageId!] })
+    return rows.length > 0
+  }
+
+  const getBot = async (platform: string, channelId: string) => {
+    const c = await ctx.database.getChannel(platform, channelId, ['assignee'])
+    return ctx.bots[`${platform}:${c?.assignee}`]
+  }
+
+  // messages in ascending order, created at or after `begin`
+  const getHistory = async (bot: Bot, channelId: string, begin: number) => {
+    const messages: Universal.Message[] = []
+    let next: string | undefined
+    while (true) {
+      logger.info("fetch history of %s:%s, next %s", bot.platform, channelId, next)
+      // data is in ascending order, `next` is the cursor to older messages
+      const page = await bot.getMessageList(channelId, next, 'before', 100)
+      if (!page.data.length) break
+      messages.unshift(...page.data.filter((v) => v.createdAt >= begin))
+      if (page.data[0].createdAt < begin || !page.next || page.next === next) break
+      next = page.next
+    }
+    return messages
+  }
+
+  const toUTC8String = (ts: number) => new Date(ts + 8 * 60 * 60 * 1000).toISOString().replace('Z', '+08:00')
 
   const markDeleted = async (rows: RelayTable[]) => {
     if (rows.length) {
@@ -112,7 +154,7 @@ export async function apply(ctx: Context, config: Config) {
   }
 
   validCtx.platform("discord").on("message-deleted", async (session) => {
-    if (config.recovery) return
+    if (isRecoveryRelation(getRelation(session))) return
     if (isSelfDeleted(session)) return
     const rows = await markDeleted(await ctx.database.get("dcqq_relay", {
       dcId: [session.messageId!],
@@ -133,7 +175,7 @@ export async function apply(ctx: Context, config: Config) {
     }
   });
   validCtx.intersect(v => v.platform !== "discord").on("message-deleted", async (session) => {
-    if (config.recovery) return
+    if (isRecoveryRelation(getRelation(session))) return
     if (isSelfDeleted(session)) return
     const rows = await markDeleted(await ctx.database.get("dcqq_relay", {
       forwardChannel: session.channelId,
@@ -153,7 +195,7 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
   });
-  const adaptDiscordMessage = async (session: Session, downloadAsset: boolean, reverseName: boolean = false) => {
+  const adaptDiscordMessage = async (session: Session, downloadAsset: boolean, reverseName: boolean = false, prefix: string = '') => {
     const dcBot = session.bot as unknown as DiscordBot
     const msg = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!);
     let roles: Role[] = [];
@@ -174,7 +216,7 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
 
-    let username = msg.author.global_name ? `${session.event.member?.nick ?? msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`
+    let username = prefix + (msg.author.global_name ? `${session.event.member?.nick ?? msg.author.global_name} (@${msg.author.username})` : `@${msg.author.username}`)
 
     // @ts-ignore
     let tmp: segment[] = await segment.transformAsync(session.elements, {
@@ -243,7 +285,7 @@ export async function apply(ctx: Context, config: Config) {
   ) as RelayRelation;
 
   validCtx.platform("discord").on("message-updated", async (session) => {
-    if (config.recovery) return
+    if (isRecoveryRelation(getRelation(session))) return
     const dcBot = session.bot as unknown as DiscordBot;
     const dcMsg = await dcBot.internal.getChannelMessage(session.channelId!, session.messageId!)
     if (dcMsg.application_id === dcBot.selfId) return // avatar refreshed
@@ -295,7 +337,14 @@ export async function apply(ctx: Context, config: Config) {
   });
 
   validCtx.platform("discord").middleware(async (session) => {
-    if (config.recovery) return
+    await enqueue(getRelation(session), async () => {
+      // backlog may overlap with the history that has just been recovered
+      if (isRecoveryRelation(getRelation(session)) && await isRelayed(session)) return
+      await relayFromDiscord(session)
+    })
+  });
+
+  const relayFromDiscord = async (session: Session, prefix: string = '') => {
     const relation = getRelation(session);
     // const forwardBot = session.app.bots.find((v) => v.platform !== "discord");
     const dcBot = session.bot as unknown as DiscordBot;
@@ -308,7 +357,7 @@ export async function apply(ctx: Context, config: Config) {
       }
     }
 
-    const msg = await adaptDiscordMessage(session, relation.downloadAsset, relation.reverseName);
+    const msg = await adaptDiscordMessage(session, relation.downloadAsset, relation.reverseName, prefix);
     let sent = await ctx.broadcast([relation.forwardPlatform + ':' + relation.forwardChannel], msg)
     // let sent = await forwardBot.sendMessage(relation.forwardChannel, msg);
     for (const sentId of sent.filter((v) => v)) {
@@ -318,31 +367,24 @@ export async function apply(ctx: Context, config: Config) {
         dcId: session.messageId,
       });
     }
-  });
+  };
 
   validCtx.intersect(v => v.platform !== "discord").middleware(async (session) => {
-    // replayed messages skip the queue, the recovery command sends them in order
-    if (!config.recovery || isRecovery(session)) return relayToDiscord(session)
-    const queue = getQueue(session.cid)
-    const ticket = queue.ticket++
-    while (!queue.ready || queue.serving !== ticket) await ctx.sleep(100)
-    try {
+    await enqueue(getRelation(session), async () => {
       // backlog may overlap with the history that has just been recovered
-      const relayed = await ctx.database.get("dcqq_relay", { forwardChannel: session.channelId, forwardId: [session.messageId!] })
-      if (!relayed.length) await relayToDiscord(session)
-    } finally {
-      queue.serving++
-    }
+      if (isRecoveryRelation(getRelation(session)) && await isRelayed(session)) return
+      await relayToDiscord(session)
+    })
   });
 
-  const relayToDiscord = async (session: Session) => {
+  const relayToDiscord = async (session: Session, prefix: string = '') => {
     const relation = getRelation(session);
     const forwardBot = session.bot;
     if (session.author.id === session.bot.selfId) return;
     let result: segment = <message />;
     result.children.push(
       <author
-        name={`${relation.showQQId ? `[QQ:${session.userId}] ` : ''}${session.username}`}
+        name={`${prefix}${relation.showQQId ? `[QQ:${session.userId}] ` : ''}${session.username}`}
         avatar={session.author.avatar}
       />
     );
@@ -406,72 +448,94 @@ export async function apply(ctx: Context, config: Config) {
     }
   };
 
-  ctx.command("recovery <begin:string> <cid:channel>")
+  ctx.command("recovery <begin:string> <platform:string>", { authority: 4 })
     .option("dry", "--dry Dry run, do not send messages")
-    .action(async ({ session, options }, beginTime, cid) => {
-      if (recovering) return
-      logger.info("recovery from %s, cid %s", beginTime, cid)
+    .action(async ({ session, options }, beginTime, platform) => {
+      if (recovering) return "正在恢复中"
       const begin = new Date(beginTime).getTime()
-      const [platform, channelId] = cid.split(':')
-      const relation = config.relations.find((v) => v.forwardChannel === channelId)
-      if (!relation) return `未找到频道 ${cid} 的转发配置`
-      // const c = await ctx.database.getChannel(relation.forwardPlatform, cid, ['assignee'])
-      // const forwardBot = ctx.bots[`${relation.forwardPlatform}:${c?.assignee}`]
-      // if (!forwardBot) return `未找到频道 ${cid} 的 bot`
-
-      function toUTC8String(ts: number) {
-        const utc8Date = new Date(ts + 8 * 60 * 60 * 1000);
-        return utc8Date.toISOString().replace('Z', '+08:00');
-      }
+      logger.warn('%o', new Date(beginTime).toLocaleString())
+      if (Number.isNaN(begin)) return `无效的时间: ${beginTime}`
+      const relations = config.relations.filter((v) => v.forwardPlatform === platform && isRecoveryRelation(v))
+      if (!relations.length) return `no relations of platform ${platform}`
+      logger.info("recovery from %s, platform %s, %d relations", beginTime, platform, relations.length)
 
       recovering = true
+      let total = 0
       try {
-        const messages: Universal.Message[] = []
-        let next: string | undefined
-        while (true) {
-          logger.info("recovery from %s, next %s", beginTime, next)
-          // data is in ascending order, `next` is the cursor to older messages
-          const page = await session.bot.getMessageList(cid, next, 'before', 100)
-          if (!page.data.length) break
-          messages.unshift(...page.data.filter((v) => v.createdAt >= begin && v.id !== session.messageId))
-          if (page.data[0].createdAt < begin || !page.next || page.next === next) break
-          next = page.next
-        }
-        logger.info("recovery from %s, %d messages", beginTime, messages.length)
-
-        let count = 0
-        for (const m of messages) {
-          m.elements = segment.parse(m.content)
-          const relayed = await ctx.database.get("dcqq_relay", { forwardChannel: cid, forwardId: [m.id] })
-          if (relayed.length) continue
-          const s = session.bot.session({
-            type: 'message',
-            channel: { type: Universal.Channel.Type.TEXT, ...m.channel, id: channelId },
-            guild: m.guild ?? { id: channelId },
-            user: m.user,
-            member: {
-              ...m.member,
-              nick: `${RECOVERY_PREFIX} [${toUTC8String(m.createdAt)}] ` + (m.member?.nick || m.member?.name || m.user?.nick || m.user?.name),
-            },
-            message: m,
-            timestamp: m.createdAt,
-          })
-          if (!options.dry) {
-            session.bot.dispatch(s)
+        for (const relation of relations) {
+          try {
+            total += await recoverRelation(relation, begin, session.messageId, options.dry)
+          } catch (e) {
+            logger.error("recovery of %s <-> discord:%s failed", relation.forwardPlatform + ':' + relation.forwardChannel, relation.discordChannel)
+            logger.error(e)
           }
-          count++
-          if (!options.dry) await ctx.sleep(2000)
+          if (!options.dry) {
+            // release the backlog even if the history sync failed, otherwise the relation stays blocked
+            const queue = getQueue(relation)
+            queue.ready = true
+            logger.info("relation %s done, %d pending messages", relation.forwardChannel, queue.ticket - queue.serving)
+          }
         }
-        if (!options.dry) {
-          const queue = getQueue(`${session.platform}:${cid}`)
-          queue.ready = true
-          logger.info("recovery of %s done, %d pending messages", cid, queue.ticket - queue.serving)
-        }
-        return `恢复完成，共 ${count} 条消息`
+        return `恢复完成，共 ${total} 条消息`
       } finally {
         recovering = false
       }
     })
+
+  // sync history of both sides in time order, returns the number of synced messages
+  const recoverRelation = async (relation: RelayRelation, begin: number, excludeId: string, dry: boolean) => {
+    const dcBot = await getBot('discord', relation.discordChannel)
+    const forwardBot = await getBot(relation.forwardPlatform, relation.forwardChannel)
+    if (!dcBot || !forwardBot) {
+      logger.warn("bot not found for relation %s <-> discord:%s", relation.forwardPlatform + ':' + relation.forwardChannel, relation.discordChannel)
+      return 0
+    }
+    const history = [
+      ...(await getHistory(dcBot, relation.discordChannel, begin)).map((m) => ({ bot: dcBot, m })),
+      ...(await getHistory(forwardBot, relation.forwardChannel, begin)).map((m) => ({ bot: forwardBot, m })),
+    ].sort((a, b) => a.m.createdAt - b.m.createdAt)
+    logger.info("relation %s, %d history messages", relation.forwardChannel, history.length)
+
+    let count = 0
+    for (const { bot, m } of history) {
+      if (m.id === excludeId) continue
+      if (m.user?.id === bot.selfId) continue
+      m.elements ??= segment.parse(m.content)
+      // @ts-ignore
+      m.elements = segment.transform(m.elements, {
+        quote(attrs) {
+          return
+        }
+      })
+      delete m.quote
+      const isDiscord = bot.platform === 'discord'
+      const channelId = isDiscord ? relation.discordChannel : relation.forwardChannel
+      const s = bot.session({
+        type: 'message',
+        channel: { type: Universal.Channel.Type.TEXT, ...m.channel, id: channelId },
+        guild: isDiscord ? { id: relation.discordGuild } : m.guild ?? { id: channelId },
+        user: m.user,
+        member: m.member,
+        message: m,
+        timestamp: m.createdAt,
+      })
+      // messages relayed before the disconnection, or sent by this bot through webhook
+      if (await isRelayed(s)) continue
+      const prefix = `${RECOVERY_PREFIX} [${toUTC8String(m.createdAt)}] `
+      logger.info("recover %s message %s", bot.platform, m.id)
+      count++
+      if (dry) continue
+      try {
+        if (isDiscord) await relayFromDiscord(s, prefix)
+        else await relayToDiscord(s, prefix)
+      } catch (e) {
+        logger.error("recover %s message %s failed", bot.platform, m.id)
+        logger.error(e)
+      }
+      await ctx.sleep(1000)
+    }
+    return count
+  }
 
   ctx
     .command("relay", "查看同步插件帮助信息")
